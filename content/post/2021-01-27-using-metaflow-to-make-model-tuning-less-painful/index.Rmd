@@ -136,7 +136,7 @@ Any image location will work for Metaflow, though, as long as the the AWS resour
 
 ## Automate the Docker build and push
 
-Building and pushing Docker images is boring, so I use a GitHub Actions workflow to do it for me. It authenticates itself to AWS using an IAM role that is restricted to pushing images to AWS Elastic Container Registry. The authentication credentials (my AWS access key ID and secret key) are stored as repository secrets. After authentication the workflow will then build the docker image from my R project/package code, and push it to ECR.
+Building and pushing Docker images is boring, so I use a GitHub Actions workflow to do it for me whenever I `git push`. The workflow authenticates itself to AWS using an IAM role that is restricted to pushing images to AWS Elastic Container Registry. The authentication credentials (my AWS access key ID and secret key) are stored as repository secrets. After authentication the workflow will then build the docker image from my R project/package code, and push it to ECR.
 
 I've stored `ECR_REPOSITORY` as a repository secret here, but that's just so I can use an identical workflow in different repositories. There's nothing secret about the repository name, and it could be hard-coded here.
 
