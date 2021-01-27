@@ -181,7 +181,7 @@ Metadata's documentation is comprehensive, and explains [the AWS services requir
 
 The following resources were needed for my setup:
 
-* AWS S3 stores the results of each Metaflow step.
+* AWS S3 stores the results of each Metaflow step^[I put a lifecycle rule on my bucket so that all objects are deleted after 24 hours. I save money, but Metaflow has a shorter memory.].
 * AWS EC2 instances provide the compute resources.
 * AWS Elastic Container Registry is used to store the images that the Metaflow jobs run on. As I mention above, this isn't strictly necessary.
 * AWS Batch is responsible for executing _jobs_ on EC2 instances that live only as long as necessary for the jobs to complete.

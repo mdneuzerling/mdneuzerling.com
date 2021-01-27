@@ -8,7 +8,7 @@ tags:
     - cloud
 images: ["/img/metaflow-flow.png"]
 output: hugodown::md_document
-rmd_hash: 0283a748f7847350
+rmd_hash: 20f60767e582aff4
 
 ---
 
@@ -146,7 +146,7 @@ Any image location will work for Metaflow, though, as long as the the AWS resour
 
 ## Automate the Docker build and push
 
-Building and pushing Docker images is boring, so I use a GitHub Actions workflow to do it for me. It authenticates itself to AWS using an IAM role that is restricted to pushing images to AWS Elastic Container Registry. The authentication credentials (my AWS access key ID and secret key) are stored as repository secrets. After authentication the workflow will then build the docker image from my R project/package code, and push it to ECR.
+Building and pushing Docker images is boring, so I use a GitHub Actions workflow to do it for me whenever I `git push`. The workflow authenticates itself to AWS using an IAM role that is restricted to pushing images to AWS Elastic Container Registry. The authentication credentials (my AWS access key ID and secret key) are stored as repository secrets. After authentication the workflow will then build the docker image from my R project/package code, and push it to ECR.
 
 I've stored `ECR_REPOSITORY` as a repository secret here, but that's just so I can use an identical workflow in different repositories. There's nothing secret about the repository name, and it could be hard-coded here.
 
@@ -189,7 +189,7 @@ Metadata's documentation is comprehensive, and explains [the AWS services requir
 
 The following resources were needed for my setup:
 
--   AWS S3 stores the results of each Metaflow step.
+-   AWS S3 stores the results of each Metaflow step[^1].
 -   AWS EC2 instances provide the compute resources.
 -   AWS Elastic Container Registry is used to store the images that the Metaflow jobs run on. As I mention above, this isn't strictly necessary.
 -   AWS Batch is responsible for executing *jobs* on EC2 instances that live only as long as necessary for the jobs to complete.
@@ -209,7 +209,7 @@ But none of this is Metaflow's fault! It's a tangent I went down to save a coupl
 
 ## It's a terrible model
 
-My flow is kept within a function in my project/package. Running the flow is a one-liner: `generate_flow() %>% metaflow::run()`. Log entries[^1] across all tasks are printed to the R console, and logs from cloud executions are saved to AWS CloudWatch as well, without any configuration on my behalf.
+My flow is kept within a function in my project/package. Running the flow is a one-liner: `generate_flow() %>% metaflow::run()`. Log entries[^2] across all tasks are printed to the R console, and logs from cloud executions are saved to AWS CloudWatch as well, without any configuration on my behalf.
 
 I give each hyperparameter tuning job 4 CPU cores and 15000MB of memory, with a little more memory for the final model train. `xgboost` is the only tool in my code that should be using more than 1 core. It takes about 2 hours to evaluate a single combination of hyperparameters. Fortunately, this all happens in parallel, so 16 combinations is still about 2 hours. The whole thing finishes in about 3 hours.
 
@@ -288,7 +288,7 @@ This is a problem when using the `tidymodels` universe. The `rsample` package us
 <span class='c'>#&gt;  collate  en_AU.UTF-8                 </span>
 <span class='c'>#&gt;  ctype    en_AU.UTF-8                 </span>
 <span class='c'>#&gt;  tz       Australia/Melbourne         </span>
-<span class='c'>#&gt;  date     2021-01-27                  </span>
+<span class='c'>#&gt;  date     2021-01-28                  </span>
 <span class='c'>#&gt; </span>
 <span class='c'>#&gt; ─ Packages ───────────────────────────────────────────────────────────────────</span>
 <span class='c'>#&gt;  package     * version    date       lib source                         </span>
@@ -337,5 +337,7 @@ This is a problem when using the `tidymodels` universe. The `rsample` package us
 
 </div>
 
-[^1]: I started to use a proper logging package, but I noticed that timestamps and task details were automatically prepended by Metaflow. It suffices to log with `message` or `print`.
+[^1]: I put a lifecycle rule on my bucket so that all objects are deleted after 24 hours. I save money, but Metaflow has a shorter memory.
+
+[^2]: I started to use a proper logging package, but I noticed that timestamps and task details were automatically prepended by Metaflow. It suffices to log with `message` or `print`.
 
