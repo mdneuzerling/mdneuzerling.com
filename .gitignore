@@ -48,3 +48,4 @@ artefacts
 *cache*
 *mlruns*
 /models/
+*.DS_Store
