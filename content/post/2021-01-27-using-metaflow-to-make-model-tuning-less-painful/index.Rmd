@@ -111,55 +111,13 @@ Step execution is controlled by `decorator`s. I use a "batch" `decorator` to tel
 
 ## There's always a Dockerfile
 
-Metaflow will use `rocker/ml` as a default image for executions on the cloud, and this should cover a lot of machine learning use cases. My project, however, uses a Docker image which provides a reproducible environment for model training. It also provides the helper functions that are used by the Metaflow `flow` in the cloud.
+Metaflow will use `rocker/ml` as a default image for executions on the cloud, and this should cover a lot of machine learning use cases. My project, however, uses a Docker image which provides a reproducible environment for model training. It also provides the helper functions that are used by the Metaflow `flow` in the cloud. [The Dockerfile is available in the GitHub repository](https://github.com/mdneuzerling/NLPRMetaflow/blob/main/Dockerfile), but I'll explain the rough idea below.
 
 I've structured my project as an R package called `NLPRMetaflow`. The dependencies are tracked through the DESCRIPTION file, and also through an `renv` lockfile. By installing the project as a package in the Docker image I can run `library(NLPRMetaflow)` and then the functions in the package will be available on every instance spawned by Metaflow.
 
 The Dockerfile is generic enough that it should work with any DESCRIPTION file and `renv` lock file, subject to some hard-coded version numbers. I start the Dockerfile `FROM rocker/r-ver:4.0.3` so that I have an R installation ready to go. Metaflow uses a Python backend, so I need to make available a Python installation with a few necessary modules. Miniconda is a good choice for a minimal Python distribution. I use environment variables to fix the version numbers of the various Python components.
 
-```
-FROM rocker/r-ver:4.0.3
-ENV MINICONDA_VERSION py38_4.9.2
-ENV PANDAS_VERSION 1.2.1
-ENV NUMPY_VERSION 1.19.2
-ENV METAFLOW_PYTHON_VERSION 2.2.5
-
-RUN apt-get update && apt-get install -y curl \
-  && curl -LO https://repo.anaconda.com/miniconda/Miniconda3-${MINICONDA_VERSION}-Linux-x86_64.sh \
-  && bash Miniconda3-${MINICONDA_VERSION}-Linux-x86_64.sh -p /miniconda -b \
-  && rm Miniconda3-${MINICONDA_VERSION}-Linux-x86_64.sh
-
-ENV PATH=/miniconda/bin:${PATH}
-ENV METAFLOW_PYTHON /miniconda/bin/python3
-
-RUN  conda install numpy=$NUMPY_VERSION pandas=$PANDAS_VERSION \
-  && conda install -c conda-forge metaflow=$METAFLOW_PYTHON_VERSION
-```
-
 For the R component I first install system dependencies based on the project/package's DESCRIPTION file. Then I install package dependencies by restoring the `renv` lockfile. This is made substantially faster by using the pre-compiled binaries kindly provided by the [RStudio Package Manager](https://packagemanager.rstudio.com/client/#/). Finally I install the project/package itself, which ensures that all of my helper functions are available in the cloud.
-
-```
-ENV RENV_VERSION 0.12.3
-
-# Use the precompiled binaries kindly provided by RStudio
-ENV CRAN_REPO https://packagemanager.rstudio.com/all/__linux__/focal/latest
-RUN Rscript -e 'install.packages(c("remotes", "devtools"), repos = c("CRAN" = Sys.getenv("CRAN_REPO")))'
-
-# Copy all project files to /package in the container
-ADD . / /package/
-WORKDIR /package
-
-# Install system dependencies
-RUN eval $(Rscript -e 'writeLines(paste(c("apt-get update", remotes::system_requirements("ubuntu", "20.04")), collapse = " && "))')
-
-# renv::restore can be a bit buggy if .Rprofile and the renv directory exist
-RUN rm -f .Rprofile \
-  && rm -rf renv \
-  && Rscript -e "install.packages('remotes', repos = c(CRAN = Sys.getenv('CRAN_REPO')))" \
-  && Rscript -e "remotes::install_github('rstudio/renv', ref = Sys.getenv('RENV_VERSION'))" \
-  && Rscript -e "renv::restore(repos = c(CRAN = Sys.getenv('CRAN_REPO')))" \
-  && Rscript -e "devtools::install(dependencies = FALSE)"
-```
 
 Once the image is built I need to put it somewhere that AWS can find it. Docker Hub is a good choice, but AWS's [Elastic Container Registry](https://docs.aws.amazon.com/AmazonECR/latest/userguide/docker-push-ecr-image.html) is likely faster as it uses S3. I tag every image with the GIT commit hash (`github.sha`) so that Metaflow will always use the correct image.
 
