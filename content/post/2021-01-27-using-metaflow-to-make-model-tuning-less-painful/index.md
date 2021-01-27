@@ -8,7 +8,7 @@ tags:
     - cloud
 images: ["/img/metaflow-flow.png"]
 output: hugodown::md_document
-rmd_hash: 9db9c1e8933f1fd5
+rmd_hash: 5cf7ad18a1ffea34
 
 ---
 
@@ -225,7 +225,7 @@ This job also has a dependency on a standard `R CMD check` job that will check t
 
 Metadata's documentation is comprehensive, and explains [the AWS services required to run Metadata flows on the cloud](https://docs.metaflow.org/metaflow-on-aws/metaflow-on-aws). A [CloudFormation template](https://admin-docs.metaflow.org/metaflow-on-aws/deployment-guide/aws-cloudformation-deployment) will set the required resources up quickly, or a [manual deployment](https://admin-docs.metaflow.org/metaflow-on-aws/deployment-guide/manual-deployment) can be used to customise the resources. I chose to manually deploy my cloud resources because I didn't wish to use the metadata component of Metaflow; this is useful for collaboration, but since it's just me I wanted to save money by not using Amazon RDS.
 
-The Metaflow documentation was as helpful as it could possibly be, but I still had trouble setting up the AWS environment I needed to execute steps on the cloud. I don't blame Metaflow at all --- this stuff is just *hard*. The following resources were needed for my setup:
+The following resources were needed for my setup:
 
 -   AWS S3 stores the results of each Metaflow step.
 -   AWS EC2 instances provide the compute resources.
@@ -233,13 +233,17 @@ The Metaflow documentation was as helpful as it could possibly be, but I still h
 -   AWS Batch is responsible for executing *jobs* on EC2 instances that live only as long as necessary for the jobs to complete.
 -   A *Compute Environment* defines the resources available to AWS Batch. I chose to use spot instances to save money.
 
-This last point proved to be painful. A compute environment relies on an "allocation strategy" to determine which instances to launch, but the available strategies are opaque. At times I would request a total of 48 vCPUs, but the compute environment would select instances that total 80 vCPUs. However, AWS accounts are limited by default to 64 vCPUs across all running spot instances. I had to request that this limit be increased to 80 on my account, otherwise my jobs would wait until resources were available.
+I set everything up on AWS following the Metaflow instructions and ran `metaflow configure aws` in a terminal to link everything to my local machine. This part of the configuration was mostly painless. I ran into a few bumps with IAM roles: I'd advise caution when AWS offers to create IAM roles on your behalf --- if you run into problems, try creating your own roles manually.
 
-I also had a lot of trouble dealing with IAM roles. "EC2 Spot Fleet Role" is not the same as "EC2 - Spot Fleet", as I discovered after an hour of instances not launching. I'd also advise caution when AWS offers to create IAM roles on your behalf --- if you run into problems, try creating your own roles, following whatever AWS documentation you can find. Other than that it's just a matter of solving every IAM issue as they arise. And they *will* arise.
+## Use spot instances to save money
 
-Overall I found the AWS setup processing very frustrating. Many configurations cannot be changed once a resource has been created, so I found myself in trial-and-error loops of creating and deleting resources until a configuration worked. Logs are helpful, if you can find them --- issues with an AWS Batch compute environment would have log entries in automatically generated EC2 Auto Scaling Groups, at the bottom of a navigation pane, in a different service, under an "activity" tab.
+Spot instances can be a lot cheaper than on-demand instances, so I set up a compute environment that exclusively uses spot instances. At this point I was no longer following the Metaflow documentation and I was on my own. This was painful.
 
-But none of this is Metaflow's fault! And it's worth powering through the AWS hassles to see compute resources launch themselves to satisfy my computational requirements.
+A compute environment relies on an "allocation strategy" to determine which instances to launch, but the available strategies are opaque. At times I would request a total of 48 vCPUs, but the compute environment would select instances that total 80 vCPUs. However, AWS accounts are limited by default to 64 vCPUs across all running spot instances. I had to request that this limit be increased to 80 on my account, otherwise my jobs would wait until resources were available.
+
+Overall I found the compute environment setup frustrating. Many settings can't be changed once a compute environment has been created, so I found myself in a trial-and-error loop of creating and deleting environments until a configuration worked. Logs are helpful, if you can find them --- issues with a compute environment have log entries in automatically generated EC2 Auto Scaling Groups, at the bottom of a navigation pane, in a different service, under an "activity" tab.
+
+But none of this is Metaflow's fault! It's a tangent I went down to save a couple of dollars. I got there in the end.
 
 ## It's a terrible model
 
