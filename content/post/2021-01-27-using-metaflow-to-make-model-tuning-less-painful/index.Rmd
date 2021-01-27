@@ -259,6 +259,6 @@ self$optimal_hyperparameters <- select_best_hyperparameters(
 ```
 
 ***
-```{r sessioninfo}
+```{r sessioninfo, eval=TRUE}
 devtools::session_info()
 ```
