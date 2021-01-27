@@ -8,7 +8,7 @@ tags:
     - cloud
 images: ["/img/metaflow-flow.png"]
 output: hugodown::md_document
-rmd_hash: 5cf7ad18a1ffea34
+rmd_hash: 230247604f609d60
 
 ---
 
@@ -278,9 +278,9 @@ Determining AWS costs requires some advanced divination techniques, but it looks
 
 Metaflow is the closest I've ever gotten to seeing the promise of the cloud fulfilled --- on-demand, scalable resources that exist only as long as needed. Once I got past the AWS hurdles I was able to seamlessly transition my machine learning workflow from my laptop to the cloud *halfway through a workflow*, with the complexities handled behind the scenes.
 
-[The machine learning engineering space is flourishing](https://huyenchip.com/2020/12/30/mlops-v2.html), and Metaflow ticks the most important boxes that I look for in tools like this:
+[The MLOps space is flourishing](https://huyenchip.com/2020/12/30/mlops-v2.html), and Metaflow ticks the most important boxes that I look for in tools like this:
 
--   It executes arbitrary code, not frameworks. I don't have to worry about a `parsnip` integration, I just write code that uses `parsnip`.
+-   It executes arbitrary code, not frameworks. I don't have to worry about whether there exists a `parsnip` integration, I just write code that uses `parsnip`.
 -   It lets me use Python *or* R.
 -   It's [**very** well-documented](https://docs.metaflow.org/v/r/) with [a number of tutorials that showcase its capabilities](https://docs.metaflow.org/v/r/getting-started/tutorials).
 -   The devs are friendly and awesome.
