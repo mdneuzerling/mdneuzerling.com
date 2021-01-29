@@ -199,6 +199,8 @@ Overall I found the compute environment setup frustrating. Many settings can't b
 
 But none of this is Metaflow's fault! It's a tangent I went down to save a couple of dollars. I got there in the end.
 
+**UPDATE 2020-01-29**: [The latest version of Metaflow supports AWS Fargate as a compute backend to AWS Batch](https://docs.metaflow.org/introduction/release-notes#features). I haven't tried this myself yet, but it looks like an easier (and cheaper) alternative to spot instances. It looks like [a Fargate instance supports up to 4 vCPUs and 30GB of memory](https://docs.aws.amazon.com/AmazonECS/latest/userguide/task-cpu-memory-error.html).
+
 ## It's a terrible model
 
 My flow is kept within a function in my project/package. Running the flow is a one-liner: `generate_flow() %>% metaflow::run()`. Log entries^[I started to use a proper logging package, but I noticed that timestamps and task details were automatically prepended by Metaflow. It suffices to log with `message` or `print`.] across all tasks are printed to the R console, and logs from cloud executions are saved to AWS CloudWatch as well, without any configuration on my behalf.

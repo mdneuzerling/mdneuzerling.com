@@ -8,7 +8,7 @@ tags:
     - cloud
 images: ["/img/metaflow-flow.png"]
 output: hugodown::md_document
-rmd_hash: 20f60767e582aff4
+rmd_hash: d8ab48f813d8e385
 
 ---
 
@@ -207,6 +207,8 @@ Overall I found the compute environment setup frustrating. Many settings can't b
 
 But none of this is Metaflow's fault! It's a tangent I went down to save a couple of dollars. I got there in the end.
 
+**UPDATE 2020-01-29**: [The latest version of Metaflow supports AWS Fargate as a compute backend to AWS Batch](https://docs.metaflow.org/introduction/release-notes#features). I haven't tried this myself yet, but it looks like an easier (and cheaper) alternative to spot instances. It looks like [a Fargate instance supports up to 4 vCPUs and 30GB of memory](https://docs.aws.amazon.com/AmazonECS/latest/userguide/task-cpu-memory-error.html).
+
 ## It's a terrible model
 
 My flow is kept within a function in my project/package. Running the flow is a one-liner: `generate_flow() %>% metaflow::run()`. Log entries[^2] across all tasks are printed to the R console, and logs from cloud executions are saved to AWS CloudWatch as well, without any configuration on my behalf.
@@ -288,7 +290,7 @@ This is a problem when using the `tidymodels` universe. The `rsample` package us
 <span class='c'>#&gt;  collate  en_AU.UTF-8                 </span>
 <span class='c'>#&gt;  ctype    en_AU.UTF-8                 </span>
 <span class='c'>#&gt;  tz       Australia/Melbourne         </span>
-<span class='c'>#&gt;  date     2021-01-28                  </span>
+<span class='c'>#&gt;  date     2021-01-29                  </span>
 <span class='c'>#&gt; </span>
 <span class='c'>#&gt; ─ Packages ───────────────────────────────────────────────────────────────────</span>
 <span class='c'>#&gt;  package     * version    date       lib source                         </span>
