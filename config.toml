@@ -20,7 +20,7 @@ disableLanguages        = [""]
   jsFiles               = ["default"]
   highlightjs           = false
   highlightjsTheme      = "github"
-  highlightjsLang       = ["r", "bash", "html", "css", "js", "toml"]
+  highlightjsLang       = ["r", "bash", "html", "css", "js", "toml", "python", "julia"]
   viewMorePostsLink     = "/post/"
   readingTime           = false
   # socialShare           = ["twitter", "facebook", "reddit", "linkedin",
@@ -47,7 +47,7 @@ disableLanguages        = [""]
     paragraph             = "Data, Maths, R"
     rssIntro              = true
     socialIntro           = true
-    hideWhenSingleColumn  = false
+    hideWhenSingleColumn  = true
     alwaysOnHomepage      = false
 
     [params.intro.pic]
