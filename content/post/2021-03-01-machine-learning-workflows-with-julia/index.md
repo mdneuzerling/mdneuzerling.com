@@ -7,7 +7,7 @@ tags:
     - julia
 images: ["/img/pokemon-total-stats.png"]
 output: hugodown::md_document
-rmd_hash: fc8f7f26365b1508
+rmd_hash: 18617f3733ab0201
 
 ---
 
@@ -282,6 +282,8 @@ I define a pipeline with the `@pipeline` macro and give it a nice name:
 
 </div>
 
+## Self-tuning pipes
+
 I might also eke out a little more performance by tuning my random forest. Two good candidate hyperparameters to tune in a random forest are `max_depth` (how deep the individual trees are allowed to grow) and `n_subfeatures` (how many randomly selected features are allowed as candidates for each split).
 
 `MLJ` asks that I define a `range` for each hyperparameter I wish to tune. The input for each `range` is the pipeline that I'm intending to tune, along with the variable --- note that I'm choosing the `max_depth` parameter within the `random_forest_classifier` within the pipe. Finally I specify the values. I explicitly provide the values I wish to test, but [there are alternative methods](https://alan-turing-institute.github.io/MLJ.jl/stable/tuning_models/).
@@ -342,7 +344,9 @@ With the ranges I can create a `TunedModel` from my pipeline. I'm specifying cro
 
 A core concept of `MLJ` is a `machine`, which combines a model with data. A machine is what can be passed through `fit` and `predict`, and can store learned parameters. I'll define an `tuned_pipe_machine` from my `tuned_pipe`, along with `X` and `categorical(y)`. This is what MLJ refers to as a *self-tuning pipe* --- when I `fit!` this machine, it will (by default) first use cross-validation to tune the hyperparameters, and then it will use the best hyperparameters to train a final model on all available data. I'm going to pass a value to the `rows` argument to hold 30% of the data back for a final evaluation, following the general principle that it's a bad idea to validate on the same data used for model tuning.
 
-Note that `fit!` ends with [`!`](https://rdrr.io/r/base/Logic.html). This is a Julia convention that signals to the user that the function modifies at least one of its arguments in place (in this case, the `tuned_pipe_machine` is fit). [I've spoken about this before](https://mdneuzerling.com/post/first-impressions-of-julia-from-an-r-user/), but I maintain that this convention is hugely powerful for Julia. In other languages I'm often left trying to remember which functions manipulate their inputs, but with Julia I don't have to keep that mental record.
+## Fitting the final model
+
+Note that the `fit!` function ends with [`!`](https://rdrr.io/r/base/Logic.html). This is a Julia convention that signals to the user that the function modifies at least one of its arguments in place (in this case, the `tuned_pipe_machine` is fit). [I've spoken about this before](https://mdneuzerling.com/post/first-impressions-of-julia-from-an-r-user/), but I maintain that this convention is hugely powerful for Julia. In other languages I'm often left trying to remember which functions manipulate their inputs, but with Julia I don't have to keep that mental record.
 
 <div class="highlight">
 
@@ -414,7 +418,7 @@ Additionally, at one point I was struggling to understand the cross-validation a
 <span class='c'>#&gt;  collate  en_AU.UTF-8                 </span>
 <span class='c'>#&gt;  ctype    en_AU.UTF-8                 </span>
 <span class='c'>#&gt;  tz       Australia/Melbourne         </span>
-<span class='c'>#&gt;  date     2021-03-01                  </span>
+<span class='c'>#&gt;  date     2021-03-02                  </span>
 <span class='c'>#&gt; </span>
 <span class='c'>#&gt; ─ Packages ───────────────────────────────────────────────────────────────────</span>
 <span class='c'>#&gt;  package     * version     date       lib</span>
