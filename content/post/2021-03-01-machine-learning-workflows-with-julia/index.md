@@ -7,7 +7,7 @@ tags:
     - julia
 images: ["/img/pokemon-total-stats.png"]
 output: hugodown::md_document
-rmd_hash: 18617f3733ab0201
+rmd_hash: ac6627581459762f
 
 ---
 
@@ -176,7 +176,7 @@ The final steps of this chain are an `all` function, which collapses an array of
 
 ## A straightforward random forest
 
-I'll start by training a random forest with (mostly) default values. `MLJ` follows the Python tradition of separating out an `X` data frame of training data and a `y` target column. I don't think there's anything *wrong* with this approach, but I feel like I've been spoilt by R's use of formulae. It's nice to keep all of the data together and not have to track multiple variables per data set. It also makes sense to me that pulling out a column and treating it as a "target variable" is a property of the model, not the data. But there's no reason that `MLJ` couldn't, in theory, be extended with a formula-like API. In fact, Julia's multiple dispatch would probably make that straightforward.
+I'll start by training a random forest with (mostly) default values. `MLJ` follows the Python tradition of separating out an `X` data frame of training data and a `y` target column. I don't think there's anything *wrong* with this approach, but I feel like I've been spoilt by R's use of formulae. It's nice to keep all of the data together and not have to track multiple variables per data set. It also makes sense to me that pulling out a column and treating it as a "target variable" is a property of the model, not the data. But I'm nitpicking here --- MLJ is *excellent*, and I shouldn't fault it for not having an R convenience that I'm used to.
 
 I'll keep my `X` data set to just the stat columns and the `:Total`:
 
