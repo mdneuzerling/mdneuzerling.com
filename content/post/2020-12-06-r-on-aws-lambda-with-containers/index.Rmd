@@ -215,12 +215,23 @@ Afterwards, I click the "Test" button again and see the results:
 The function is working! As a final check I'll invoke the function through the AWS CLI:
 
 ```
-aws lambda invoke --function-name parity --invocation-type RequestResponse --payload '{"number": 8}' /tmp/response.json
+aws lambda invoke --function-name parity \
+  --invocation-type RequestResponse --payload '{"number": 8}' \
+  /tmp/response.json
 ```
 
 And, sure enough, the `response.json` file contains the expected `{"parity":"even"}` result.
 
 The performance isn't fantastic. Each invocation takes about 120ms. The initalisation time is 7 seconds, reduced to 2.3 seconds if I increase the available memory to the maximum of 10GB. This seems slow to me, but then again I don't have a good baseline for container-based Lambda functions. The initialisation penalty is only incurred if the function hasn't been called for a while --- for requests in quick succession the image is kept alive.
+
+### Update 2021-03-10
+Thank you to @berkorbay for telling me that this invocation command doesn't work on the latest version of the AWS CLI. They suggested this instead:
+
+```
+aws lambda invoke --function-name parity \
+  --invocation-type RequestResponse --payload '{"number": 8}' \
+  /tmp/response.json --cli-binary-format raw-in-base64-out
+```
 
 ## Logging is good
 
