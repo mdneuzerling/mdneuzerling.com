@@ -1,0 +1,412 @@
+---
+title: MLOps with GitHub Actions and R
+author: ~
+date: '2020-06-28'
+slug: mlops-with-github-actions-and-r
+tags:
+    - R
+images: ["/img/github-actions-comment.png"]
+featuredalt: |
+    A comment on a GitHub Actions pull request, giving various numeric metrics.
+    The commenter is "github-actions", and is labelled as a "bot".
+
+---
+
+<script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
+
+
+<p>Machine learning models get stuck at the deployment stage all the time. This stuff is hard.</p>
+<p><a href="https://help.github.com/en/actions">GitHub Actions</a> is a tool for automating tasks associated with a repository. I wanted to see if I could implement some sort of end-to-end automatic training, deployment and execution of a model. And I’m going to use R because people keep telling me that this sort of stuff can’t be done with R.</p>
+<p>I want a git repository with two main branches: <em>trunk</em> and <em>production</em>. When I push new code to <em>trunk</em>, my unit tests are automatically run. When I create a pull request from <em>trunk</em> to <em>production</em>, my model is automatically trained, and results commented in the pull request. When I merge, my model is deployed. On a schedule, my model is executed. I’ve heard this sort of automation referred to as “MLOps”, the machine learning analogue of DevOps.</p>
+<p><img src="full-pr-comment.png" /></p>
+<p>I’ve put all of this into <a href="https://github.com/mdneuzerling/ReviewSentiment">a repository with a toy model</a>. The picture above is the comment for <a href="https://github.com/mdneuzerling/ReviewSentiment/pull/29">this pull request</a>.</p>
+<p>I was inspired by a similar post on the <a href="https://github.blog/2020-06-17-using-github-actions-for-mlops-data-science/">GitHub Blog</a> by <a href="https://github.com/hamelsmu">Hamel Husain</a>. Hamel used an external tool (Argo) to train the model, but I wanted to see if I could make do with just GitHub Actions and some persistent storage. I used S3, but I imagine any sort of cloud storage service would work here.</p>
+<div id="automated-unit-tests" class="section level2">
+<h2>Automated unit tests</h2>
+<p>I’ve created my model as an R package, using drake to define the model training and execution plans. Check out <a href="/post/upgrade-your-workflow-with-drake/">my previous post on drake</a> for a little more detail about how this model is put together. In short, the model functions can be loaded with <code>devtools::load_all()</code>, the plan specified with <code>training_plan()</code> or <code>execution_plan()</code>, and the run with <code>drake::make</code>. But before we even get to that, there are unit tests on the functions in the package. I want these unit tests to run every time I push to the default <em>trunk</em> branch.</p>
+<p>The <code>usethis</code> package makes this incredibly easy. If you’ve already set up git in your RStudio project, you can just run <code>usethis::use_github_actions()</code> to set up a standard <code>R CMD check</code> on push and pull request, using a MacOS runner. It even automatically puts a status badge in your README. It’s that easy, I swear.</p>
+<pre><code># The GitHub workflow created by usethis::use_github_actions(), taken from
+# https://github.com/r-lib/actions/blob/master/examples/check-release.yaml
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+name: R-CMD-check
+
+jobs:
+  R-CMD-check:
+    runs-on: macOS-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: r-lib/actions/setup-r@master
+      - name: Install dependencies
+        run: |
+          install.packages(c(&quot;remotes&quot;, &quot;rcmdcheck&quot;))
+          remotes::install_deps(dependencies = TRUE)
+        shell: Rscript {0}
+      - name: Check
+        run: rcmdcheck::rcmdcheck(args = &quot;--no-manual&quot;, error_on = &quot;error&quot;)
+        shell: Rscript {0}</code></pre>
+<p>But I wanted to go a bit further and ensure I was creating a reproducible environment, and also using a Linux runner with a fast setup time.</p>
+<p>Reproducibility matters here, and that means we need to lock down the operating system, R version, and package versions. I’ve used <a href="https://rstudio.github.io/renv/">renv</a> to lock down the package versions, and I’ll specify the operating system and R version in the GitHub Actions workflows themselves. I initialise the <code>renv</code> lockfile and associated objects with <code>renv::activate()</code>. By running <code>renv::restore()</code> I can install the packages with the exact same versions I used when developing my model locally.</p>
+<p>For most purposes, MacOS is a great candidate for a runner. But my development environment is Linux, and I wanted my workflows to match. Moreover, for billing in private repositories, 1 minute of a MacOS job is worth <strong>10 minutes</strong> of a Linux job. The problem with using a Linux runner is that R packages are installed from source, and that can take a long time. On a similar project, I was looking at a 32 minute <code>R CMD check</code> workflow on Linux, versus 4 minutes on MacOS!</p>
+<p>RStudio recently made their <a href="https://packagemanager.rstudio.com/client/#/">Package Manager</a> publicly available. This is kind of like CRAN, but has precompiled binaries for common Linux distributions. By using this repo I can complete the <code>R CMD check</code> in about 6 minutes; it’s a bit slower than MacOS, but given the difference in billing I think the trade-off is well worth it. If I really wanted to trim down the check time, I could cache the installed packages, but I think the time is acceptable as is.</p>
+<p>Here’s the workflow I settled on. Note also that I install system dependencies such as <code>libcurl</code> based on the <code>DESCRIPTION</code> file in the model package:</p>
+<pre><code># My expanded R CMD check workflow
+
+on:
+  push:
+    branches:
+      - trunk
+  pull_request:
+    branches:
+      - trunk
+
+name: R-CMD-check
+
+jobs:
+  R-CMD-check:
+    env:
+      CRAN_REPO: https://packagemanager.rstudio.com/all/__linux__/bionic/latest
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: r-lib/actions/setup-r@master
+        with:
+          r-version: &#39;4.0.0&#39;
+      - name: Install remotes
+        run: |
+          install.packages(&quot;remotes&quot;, repos = c(&quot;CRAN&quot; = Sys.getenv(&quot;CRAN_REPO&quot;)))
+        shell: Rscript {0}
+      - name: Install system dependencies
+        env:
+          RHUB_PLATFORM: linux-x86_64-ubuntu-gcc
+        run: |
+          Rscript -e &quot;remotes::install_github(&#39;r-hub/sysreqs&#39;)&quot;
+          sysreqs=$(Rscript -e &quot;cat(sysreqs::sysreq_commands(&#39;DESCRIPTION&#39;))&quot;)
+          sudo -s eval &quot;$sysreqs&quot;
+      - name: Restore dependencies from renv lockfile
+        run: |
+          cran_repo &lt;- c(&quot;CRAN&quot; = Sys.getenv(&quot;CRAN_REPO&quot;))
+          install.packages(c(&quot;renv&quot;, &quot;rcmdcheck&quot;), repos = cran_repo)
+          renv::restore(repos = cran_repo)
+        shell: Rscript {0}
+      - name: Check
+        run: rcmdcheck::rcmdcheck(args = &quot;--no-manual&quot;, error_on = &quot;error&quot;)
+        shell: Rscript {0}</code></pre>
+<p>For the most part, this action runs silently. If there’s an error in the check, such as a failing unit test or the package can’t be installed, then I’ll get an email about it. I could even set up a requirement that this check must pass before I merge into the <em>production</em> branch.</p>
+</div>
+<div id="model-training" class="section level2">
+<h2>Model training</h2>
+<p>This is the longest workflow. I need to accomplish the following:</p>
+<ol style="list-style-type: decimal">
+<li>Set up R as in the <code>R CMD check</code> workflow</li>
+<li>Run <code>drake::make</code> on the training plan</li>
+<li>Maintain a text file <code>bot-comment.txt</code> which contains the markdown for the pull request comment</li>
+<li>Upload the ggplot to S3</li>
+<li>Post the comment</li>
+<li>Upload the trained model to S3</li>
+</ol>
+<pre><code>on:
+  pull_request:
+    branches:
+      - production
+
+name: model-training
+
+jobs:
+  model-training:
+    env:
+      S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+      COMMIT_HASH: ${{ github.event.pull_request.head.sha }}
+      CRAN_REPO: https://packagemanager.rstudio.com/all/__linux__/bionic/latest
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: r-lib/actions/setup-r@master
+        with:
+          r-version: &#39;4.0.0&#39;
+      - name: Install remotes
+        run: |
+          install.packages(&quot;remotes&quot;, repos = c(&quot;CRAN&quot; = Sys.getenv(&quot;CRAN_REPO&quot;)))
+        shell: Rscript {0}
+      - name: Install system dependencies
+        env:
+          RHUB_PLATFORM: linux-x86_64-ubuntu-gcc
+        run: |
+          Rscript -e &quot;remotes::install_github(&#39;r-hub/sysreqs&#39;)&quot;
+          sysreqs=$(Rscript -e &quot;cat(sysreqs::sysreq_commands(&#39;DESCRIPTION&#39;))&quot;)
+          sudo -s eval &quot;$sysreqs&quot;
+      - name: Restore and install dependencies
+        run: |
+          cran_repo &lt;- c(&quot;CRAN&quot; = Sys.getenv(&quot;CRAN_REPO&quot;))
+          install.packages(c(&quot;renv&quot;, &quot;rcmdcheck&quot;), repos = cran_repo)
+          renv::restore(repos = cran_repo)
+          if (!require(&quot;drake&quot;)) install.packages(&quot;drake&quot;, repos = cran_repo)
+          if (!require(&quot;knitr&quot;)) install.packages(&quot;knitr&quot;, repos = cran_repo)
+          if (!require(&quot;digest&quot;)) install.packages(&quot;digest&quot;, repos = cran_repo)
+        shell: Rscript {0}
+      - name: drake-make
+        run: |
+          devtools::load_all()
+          plan &lt;- training_plan()
+          seed &lt;- digest::digest2int(Sys.getenv(&quot;COMMIT_HASH&quot;))
+          set.seed(seed)
+          drake::make(plan)
+          his &lt;- drake::drake_history()[c(&quot;target&quot;, &quot;built&quot;, &quot;runtime&quot;)]
+          his &lt;- his[with(his, order(-runtime)), ]
+          writeLines(paste0(&quot;# Training run &quot;, Sys.getenv(&quot;COMMIT_HASH&quot;), &quot;\n\n&quot;), &quot;bot-comment.txt&quot;)
+          write(&quot;\n### Drake build history\n\n&quot;, &quot;bot-comment.txt&quot;, append = TRUE)
+          write(knitr::kable(his, format = &quot;markdown&quot;), &quot;bot-comment.txt&quot;, append = TRUE)
+        shell: Rscript {0}
+      - name: Convert metrics tables to markdown
+        run: |
+          cm &lt;- readr::read_rds(&quot;artefacts/confusion_matrix.rds&quot;)
+          metrics &lt;- readr::read_rds(&quot;artefacts/metrics.rds&quot;)
+          write(&quot;\n\n### Confusion matrix\n&quot;, &quot;bot-comment.txt&quot;, append = TRUE)
+          write(knitr::kable(cm, format = &quot;markdown&quot;), &quot;bot-comment.txt&quot;, append = TRUE)
+          write(&quot;\n\n### Metrics\n&quot;, &quot;bot-comment.txt&quot;, append = TRUE)
+          write(knitr::kable(metrics, format = &quot;markdown&quot;), &quot;bot-comment.txt&quot;, append = TRUE)
+        shell: Rscript {0}
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - name: Upload metrics image
+        run: |
+          METRICS_PNG_KEY=$&quot;$GITHUB_REPOSITORY/$GITHUB_WORKFLOW/$COMMIT_HASH/metrics.png&quot;
+          aws s3api put-object --bucket &quot;$S3_BUCKET&quot; --key &quot;$METRICS_PNG_KEY&quot; --content-type &quot;image/png&quot; --acl &quot;public-read&quot; --body &quot;artefacts/metrics.png&quot;
+          METRICS_PNG_URL=$&quot;https://$S3_BUCKET.s3.amazonaws.com/$METRICS_PNG_KEY&quot;
+          METRICS_PNG_MARKDOWN=$&#39;!&#39;&quot;[]($METRICS_PNG_URL)&quot;
+          echo -e &quot;\n\n$METRICS_PNG_MARKDOWN&quot; &gt;&gt; bot-comment.txt
+      - name: Comment on pull request
+        uses: machine-learning-apps/pr-comment@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          path: bot-comment.txt
+      - name: Tar artefacts as candidate model
+        run: tar czf candidate-model.tar.gz artefacts
+      - name: Upload candidate_model to S3
+        run: |
+          CANDIDATE_MODEL_KEY=$&quot;$GITHUB_REPOSITORY/candidate-models/$COMMIT_HASH/candidate-model.tar.gz&quot;
+          aws s3api put-object --bucket &quot;$S3_BUCKET&quot; --key &quot;$CANDIDATE_MODEL_KEY&quot; --acl &quot;public-read&quot; --body &quot;candidate-model.tar.gz&quot;</code></pre>
+<p>I want a common identifier for everything I’m doing here, and that’s going to be a commit hash. I’ll use it to identify model artefacts uploaded to S3, and as a heading in the pull request comment. If another commit is made while the PR is still open, then there will be a new hash to identify the new training run. To make sure that everything is entirely reproducible, I’ll also use the commit hash as a random seed<a href="#fn1" class="footnote-ref" id="fnref1"><sup>1</sup></a> right before I run <code>drake::make</code>. I’m using the commit hash of the pull request “head”, which means nothing to me, but it matches the hash that I have in mind.</p>
+<p>The <code>bot-comment.txt</code> is a file maintained throughout. Variables aren’t maintained between steps in a job, so a file is a good way to store data that needs to exist until the job is done. I initialise it with a heading with the commit hash, and then append the drake build history. This will give me an idea of what’s taking time when the model is trained.<a href="#fn2" class="footnote-ref" id="fnref2"><sup>2</sup></a> I’ll also append a confusion matrix and table of metrics created in the training plan. I use <code>knitr::kable</code> to convert R data frames to markdown tables.</p>
+<p>There’s no persistent storage with GitHub Actions, so I use S3 to store images which I can embed within the markdown comment. The <code>aws-actions/configure-aws-credentials</code> action is provided by AWS, and sets up the runner so that it can interact with S3. I obviously don’t want to expose my AWS credentials in the workflow, so I set them up as <a href="https://help.github.com/en/actions/configuring-and-managing-workflows/creating-and-storing-encrypted-secrets">secrets</a>. Then, instead of putting my AWS secret access key in plain text I can refer to it with <code>{{ secrets.AWS_SECRET_ACCESS_KEY }}</code>.</p>
+<p>I use the AWS CLI to upload the image. In the S3 Management Console I had to configure the bucket to allow objects with public read permissions. This doesn’t make everything in the bucket public. I still have to upload the image with the <code>--acl "public-read"</code> option to make that specific object publicly available. One other thing that tripped me up was the content type: without setting <code>--content-type "image/png"</code> the image won’t appear in the comment.<a href="#fn3" class="footnote-ref" id="fnref3"><sup>3</sup></a></p>
+<p>Everything is kept linked to the commit hash. Take a look at the object path I use:</p>
+<pre><code>$GITHUB_REPOSITORY/$GITHUB_WORKFLOW/$COMMIT_HASH/metrics.png</code></pre>
+<p>Those first two environment variables will automatically exist in every workflow. After multiple training runs, the S3 bucket looks like this in the “mdneuzerling/ReviewSentiment/model-training” directory:</p>
+<p><img src="s3-with-multiple-runs.png" /></p>
+<p>Now we can post the comment. I found the <a href="https://github.com/marketplace/actions/pr-comment-from-file"><code>machine-learning-apps/pr-comment</code></a> action on the <a href="https://github.com/marketplace">GitHub Action Marketplace</a> to do this for me. It requires the <code>GITHUB_TOKEN</code> environment variable which is provided automatically.</p>
+<p>Finally, I need to do something with the model I made. So far I’ve been using the <code>artefacts</code> directory to store everything related to the model. I tar it and upload it to S3 as a “candidate model”, again using the commit hash as an identifier.</p>
+</div>
+<div id="model-deployment" class="section level2">
+<h2>Model deployment</h2>
+<p>Models are deployed when a pull request to the <em>production</em> branch is merged. I’m using a really basic form of “deployment” here — the candidate model is copied to a specific object in S3. There are other tools out there to handle deployments (like, say, <a href="https://developer.github.com/v3/guides/delivering-deployments/">through GitHub</a>) but I wanted to keep things simple and within the scope of GitHub Actions and S3.</p>
+<p>There’s a real risk here of accumulating a large number of candidate models. Machine learning models tends to be quite large, so there’s a chance of accumulating some billing costs here. An option is to set a retention period on candidate models, so that they’re automatically deleted after a set time. But my models are less than a megabyte, so I’ll leave it be.</p>
+<pre><code>on:
+  pull_request:
+    branches:
+      - production
+    types:
+      - closed
+
+name: model-deployment
+
+jobs:
+  merge-PR:
+    env:
+      S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+      COMMIT_HASH: ${{ github.event.pull_request.head.sha }}
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - name: Copy candidate_model to production_model
+        run: |
+          CANDIDATE_MODEL_KEY=$&quot;$GITHUB_REPOSITORY/candidate-models/$COMMIT_HASH/candidate-model.tar.gz&quot;
+          PRODUCTION_MODEL_KEY=$&quot;$GITHUB_REPOSITORY/production-model.tar.gz&quot;
+          aws s3api copy-object --bucket &quot;$S3_BUCKET&quot; --copy-source &quot;$S3_BUCKET/$CANDIDATE_MODEL_KEY&quot; --acl &quot;public-read&quot; --key &quot;$PRODUCTION_MODEL_KEY&quot;</code></pre>
+</div>
+<div id="model-execution" class="section level2">
+<h2>Model execution</h2>
+<p>Model execution is similar to model training. The production model is downloaded from S3 and untarred. This creates and populates the <code>artefact</code> folder to be exactly as it was after model training. From there, I run <code>execution_plan()</code> with <code>drake::make</code>.</p>
+<pre><code>on:
+  push:
+    branches:
+      - production
+  schedule:
+    - cron: &#39;0 12 * * 1&#39;
+
+name: model-execution
+
+jobs:
+  model-execution:
+    env:
+      S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+      CRAN_REPO: https://packagemanager.rstudio.com/all/__linux__/bionic/latest
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - name: Upload candidate_model to S3
+        run: |
+          PRODUCTION_MODEL_KEY=$&quot;$GITHUB_REPOSITORY/production-model.tar.gz&quot;
+          aws s3api get-object --bucket &quot;$S3_BUCKET&quot; --key &quot;$PRODUCTION_MODEL_KEY&quot; production-model.tar.gz
+      - name: Un-tar artefacts from production model
+        run: tar -xvf production-model.tar.gz
+      - uses: r-lib/actions/setup-r@master
+        with:
+          r-version: &#39;4.0.0&#39;
+      - name: Install remotes
+        run: |
+          install.packages(&quot;remotes&quot;, repos = c(&quot;CRAN&quot; = Sys.getenv(&quot;CRAN_REPO&quot;)))
+        shell: Rscript {0}
+      - name: Install system dependencies
+        env:
+          RHUB_PLATFORM: linux-x86_64-ubuntu-gcc
+        run: |
+          Rscript -e &quot;remotes::install_github(&#39;r-hub/sysreqs&#39;)&quot;
+          sysreqs=$(Rscript -e &quot;cat(sysreqs::sysreq_commands(&#39;DESCRIPTION&#39;))&quot;)
+          sudo -s eval &quot;$sysreqs&quot;
+      - name: Restore and install dependencies
+        run: |
+          cran_repo &lt;- c(&quot;CRAN&quot; = Sys.getenv(&quot;CRAN_REPO&quot;))
+          install.packages(c(&quot;renv&quot;, &quot;rcmdcheck&quot;), repos = cran_repo)
+          renv::restore(repos = cran_repo)
+          if (!require(&quot;drake&quot;)) install.packages(&quot;drake&quot;, repos = cran_repo)
+        shell: Rscript {0}
+      - name: drake-make
+        run: |
+          devtools::load_all()
+          plan &lt;- execution_plan()
+          seed &lt;- digest::digest2int(Sys.getenv(&quot;GITHUB_SHA&quot;))
+          set.seed(seed)
+          drake::make(plan)
+          print(paste(&quot;Model executed with SHA as seed:&quot;, Sys.getenv(&quot;GITHUB_SHA&quot;)))
+        shell: Rscript {0}
+      - name: Upload predictions as GitHub Actions artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: predictions
+          path: artefacts/predictions.txt</code></pre>
+<p>This is very much a simulated process. The “new” data that comes in is just a set of 10 pre-selected values. I don’t really know how what to do with the output of a toy model, so I’ve settled here for uploading the predictions as a github artifact. These are files that are associated with the run, and are deleted after 90 days.</p>
+<p>One of the triggers for this job is a schedule — it runs every Monday at 12pm. So the model can actually be scheduled and executed entirely within GitHub Actions.</p>
+</div>
+<div id="limitations-in-github-actions" class="section level2">
+<h2>Limitations in GitHub Actions</h2>
+<p>Don’t let the below limitations discourage you from GitHub Actions. This is a very powerful and easy-to-use tool, and it’s worth checking out. I’ll certainly be using the <code>R CMD check</code> workflow for every R project I create from now on.</p>
+<p>The most obvious limitation is that of the runner — with only 7GB of RAM and 14GB of storage, many models and data workflows are excluded. The solution is to use what GitHub actions calls a <a href="https://help.github.com/en/actions/hosting-your-own-runners/about-self-hosted-runners">self-hosted runner</a> - a self-managed machine which can have whatever specs you can afford. <a href="https://help.github.com/en/actions/hosting-your-own-runners/about-self-hosted-runners#self-hosted-runner-security-with-public-repositories">This is not recommended for public repositories due to security reasons</a>. Someone could fork the repository, insert malicious code, and submit a pull request which executes the code on the runner. There may be an upcoming solution for this. The same problem would exist with secrets, for example, but instead forked repositories do not have access to the secrets.</p>
+<p>A great option here would be to spin up really powerful machines that are immediately killed after the workflow is run. There’s a great potential here for spot instances as well — I’m happy to let the occasional training run fail if it means paying a fraction of on-demand compute costs. Unfortunately, there’s currently no way to spin up and declare a self-hosted runner on the fly, as self-hosted runners must be set up through the GitHub UI.</p>
+<p>There’s a race condition here that I don’t like: when a pull request is merged, this triggers the “deployment” which copies the candidate model over to the production model. It also triggers the model execution workflow. If the execution workflow gets there first, then it will execute on the previous version of the model. There are alternatives to push triggers, like leaning into GitHub’s deployment features, or using <a href="https://help.github.com/en/actions/reference/events-that-trigger-workflows#external-events-repository_dispatch">a dispatch event</a>. The latter is my preference here, since we don’t necessarily need to the full suite of features that comes with GitHub deployments. Unfortunately, repository dispatches only work on the default branch (<a href="https://github.community/t/how-to-trigger-repository-dispatch-event-for-non-default-branch/14470/2?u=mdneuzerling">for now</a>).</p>
+<p>There’s no true support for “merge” triggers. What I’ve done instead is use the below bit of code, taken from <a href="https://github.community/t/trigger-workflow-only-on-pull-request-merge/17359/3">a GitHub actions help thread</a>. I then have a <code>if: github.event.pull_request.merged == true</code> condition for each job in the workflow. It seems to work, but I’d feel more comfortable with an official “pull request merge” trigger. Especially since I have to use the condition for each job in the workflow/</p>
+<pre><code>on:
+  pull_request:
+    branches:
+      - production
+    types:
+      - closed</code></pre>
+<p>There’s no persistent, easy storage for the ggplot image I attach in the pull request comments. I have to upload the image to an S3 bucket with public read access. This isn’t a big deal for my demo, but I imagine that for private/professional machine learning projects you don’t necessarily want to reveal your model details to the world. Hopefully one day there will be some sort of GitHub storage which inherits the access permissions of the repository with which it’s associated. See also the problem of private GitHub pages for private repositories.</p>
+<p>This last point is really minor, but I wouldn’t mind a UI option for loading parameters that aren’t secret into the workflows as environment variables. The best example here is S3-bucket: the name of my S3 bucket isn’t really a secret, but I don’t necessarily want to hardcode it into the workflows. I wouldn’t mind an option that’s similar to repository secrets, but not secret.</p>
+</div>
+<div id="limitations-in-my-approach" class="section level2">
+<h2>Limitations in my approach</h2>
+<p>The major limitation in my approach here is that my model takes care of absolutely everything internally. I can’t give my model new data to score, since it fetches new data itself. This doesn’t seem like a big deal, but imagine if my model were an abstract service that I could give arbitrary data and get predictions out. Then I could create <em>challenger</em> models that are set up in the same way, and it would be easy to compare the performance of the two; a workflow could feed the same data to both the current (champion) model and the challenger model, and compare the outputs. It could comment on a pull request with metrics comparing the two models. It would make it much easier to compare, update, and replace models.</p>
+<p>This would also open up a very powerful feature. The data behind this model is static, but suppose that instead we had new data coming in every day. This model would then be susceptible to <em>domain drift</em> (I’ve also heard this referred to as <em>concept drift</em>). The theory here is that my model was trained at a fixed point in time, but the domain on which it operates is constantly changing. A model I train might be wonderfully accurate now, but terribly inaccurate in 6 months. How’s this for a workflow idea: every month, a fork is created, the model is retrained with the same parameters but new data, and the new model is compared against the model that’s currently in deployment. If the metrics differ by more than <span class="math inline">\(x\\%\)</span> then the domain has drifted, and I’m alerted. Or, if I’m feeling brave, the new model might automatically be merged!</p>
+<p>This is magic stuff, right? But it requires models to be implemented as microservices. In other words, regardless of the internal workings of the model, I need to be able to feed the “training component” data and get a “model component” out of it. Regardless of the internal workings of the “model component”, I need to be able to feed it new data and get predictions out of it. When a new model comes along, I should be able to unplug the old model and plug the new one in without any other changes. That doesn’t sound easy to me.</p>
+</div>
+<div id="serving-machine-learning-models" class="section level2">
+<h2>Serving machine learning models</h2>
+<p>Python has “solved” this problem. Tools like <a href="https://mlflow.org/">mlflow</a> and <a href="https://www.kubeflow.org/">kubeflow</a> abstract away Python models exactly like that. There’s supposedly R support (directly in mlflow and through <a href="https://www.seldon.io/tech/products/core/">Seldon Core</a> with Kubeflow) but documentation and examples are hard to find. (My impression here is that these are Python tools, with token support for R, but <strong>please</strong> tell me if I’m wrong. I want to be wrong.)</p>
+<p>Model serving is a bit easier in Python because you have a handful of major frameworks; you can rip out a scikit-learn or pytorch object and stick it in a serving layer. But this can be a limitation, since it makes it hard to work outside of those frameworks. I’ve trained models in Python using obscure modules that are no where near the major frameworks, and if I wanted to deploy those through a popular serving tool I would have to twist them into a scikit-learn object. At that point, the tools are leading the machine learning, and not the other way around.</p>
+<p>I do like the approach that mlflow takes to serving R models through the <code>carrier</code> package: the user declares a predict function, along with a list of required artefacts. It’s a little more fiddly than just uploading a scikit-learn object, and I haven’t properly tested its limitations, but I <em>much prefer</em> the idea behind this approach. There’s plenty of scope here for automated dependency detection, just like how <code>drake</code> does it, and it’s as flexible as it gets.</p>
+<p>I’m yet to see a fundamental reason why you can’t put R models in production, despite the folk wisdom. But I do see a place for more documentation and examples.</p>
+<hr />
+<pre class="r"><code>devtools::session_info()</code></pre>
+<pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
+##  setting  value                       
+##  version  R version 4.1.0 (2021-05-18)
+##  os       macOS Big Sur 11.3          
+##  system   aarch64, darwin20           
+##  ui       X11                         
+##  language (EN)                        
+##  collate  en_AU.UTF-8                 
+##  ctype    en_AU.UTF-8                 
+##  tz       Australia/Melbourne         
+##  date     2021-05-30                  
+## 
+## ─ Packages ───────────────────────────────────────────────────────────────────
+##  package     * version date       lib source        
+##  blogdown      1.3     2021-04-14 [1] CRAN (R 4.1.0)
+##  bookdown      0.22    2021-04-22 [1] CRAN (R 4.1.0)
+##  bslib         0.2.5.1 2021-05-18 [1] CRAN (R 4.1.0)
+##  cachem        1.0.4   2021-02-13 [1] CRAN (R 4.1.0)
+##  callr         3.7.0   2021-04-20 [1] CRAN (R 4.1.0)
+##  cli           2.5.0   2021-04-26 [1] CRAN (R 4.1.0)
+##  crayon        1.4.1   2021-02-08 [1] CRAN (R 4.1.0)
+##  desc          1.3.0   2021-03-05 [1] CRAN (R 4.1.0)
+##  devtools      2.4.0   2021-04-07 [1] CRAN (R 4.1.0)
+##  digest        0.6.27  2020-10-24 [1] CRAN (R 4.1.0)
+##  ellipsis      0.3.2   2021-04-29 [1] CRAN (R 4.1.0)
+##  evaluate      0.14    2019-05-28 [1] CRAN (R 4.1.0)
+##  fastmap       1.1.0   2021-01-25 [1] CRAN (R 4.1.0)
+##  fs            1.5.0   2020-07-31 [1] CRAN (R 4.1.0)
+##  glue          1.4.2   2020-08-27 [1] CRAN (R 4.1.0)
+##  htmltools     0.5.1.1 2021-01-22 [1] CRAN (R 4.1.0)
+##  jquerylib     0.1.4   2021-04-26 [1] CRAN (R 4.1.0)
+##  jsonlite      1.7.2   2020-12-09 [1] CRAN (R 4.1.0)
+##  knitr         1.33    2021-04-24 [1] CRAN (R 4.1.0)
+##  lifecycle     1.0.0   2021-02-15 [1] CRAN (R 4.1.0)
+##  magrittr      2.0.1   2020-11-17 [1] CRAN (R 4.1.0)
+##  memoise       2.0.0   2021-01-26 [1] CRAN (R 4.1.0)
+##  pkgbuild      1.2.0   2020-12-15 [1] CRAN (R 4.1.0)
+##  pkgload       1.2.1   2021-04-06 [1] CRAN (R 4.1.0)
+##  prettyunits   1.1.1   2020-01-24 [1] CRAN (R 4.1.0)
+##  processx      3.5.2   2021-04-30 [1] CRAN (R 4.1.0)
+##  ps            1.6.0   2021-02-28 [1] CRAN (R 4.1.0)
+##  purrr         0.3.4   2020-04-17 [1] CRAN (R 4.1.0)
+##  R6            2.5.0   2020-10-28 [1] CRAN (R 4.1.0)
+##  remotes       2.3.0   2021-04-01 [1] CRAN (R 4.1.0)
+##  rlang         0.4.11  2021-04-30 [1] CRAN (R 4.1.0)
+##  rmarkdown     2.8     2021-05-07 [1] CRAN (R 4.1.0)
+##  rprojroot     2.0.2   2020-11-15 [1] CRAN (R 4.1.0)
+##  sass          0.4.0   2021-05-12 [1] CRAN (R 4.1.0)
+##  sessioninfo   1.1.1   2018-11-05 [1] CRAN (R 4.1.0)
+##  stringi       1.6.1   2021-05-10 [1] CRAN (R 4.1.0)
+##  stringr       1.4.0   2019-02-10 [1] CRAN (R 4.1.0)
+##  testthat      3.0.2   2021-02-14 [1] CRAN (R 4.1.0)
+##  usethis       2.0.1   2021-02-10 [1] CRAN (R 4.1.0)
+##  withr         2.4.2   2021-04-18 [1] CRAN (R 4.1.0)
+##  xfun          0.22    2021-03-11 [1] CRAN (R 4.1.0)
+##  yaml          2.2.1   2020-02-01 [1] CRAN (R 4.1.0)
+## 
+## [1] /Library/Frameworks/R.framework/Versions/4.1-arm64/Resources/library</code></pre>
+</div>
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn1"><p>I use <code>digest::digest2int</code> to convert the hash to an integer. There’s some integer overflow here, but I’m not overly concerned, since the seed is still deterministically derived from the hash.<a href="#fnref1" class="footnote-back">↩︎</a></p></li>
+<li id="fn2"><p>It’s not always possible to get the full training time from this history, as drake will parallelise where possible.<a href="#fnref2" class="footnote-back">↩︎</a></p></li>
+<li id="fn3"><p>Incidentally, I couldn’t work out how to split this massive S3 command over multiple lines. Any ideas? The usual bash line-continuation doesn’t work.<a href="#fnref3" class="footnote-back">↩︎</a></p></li>
+</ol>
+</div>

@@ -8,7 +8,7 @@ tags:
     - scraping
 images: ["/img/grapes.jpeg"]
 featuredalt: "grapes"
-output: hugodown::md_document
+
 ---
 
 My knowledge of wine covers three facts:

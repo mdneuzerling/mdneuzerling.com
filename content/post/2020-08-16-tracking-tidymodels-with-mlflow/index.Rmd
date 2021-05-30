@@ -6,7 +6,7 @@ slug: tracking-tidymodels-with-mlflow
 tags:
     - R
 images: ["/img/mlflow-tracking.png"]
-output: hugodown::md_document
+
 ---
 
 ```{r setup, include=FALSE}
@@ -19,6 +19,8 @@ library(mlflow)
 After I posted [my efforts to use MLflow to serve a model with R](/post/deploying-r-models-with-mlflow-and-docker/), I was worried that people may think I don't _like_ MLflow. I want to declare this: MLflow is awesome. I'll showcase its model tracking features, and how to integrate them into a `tidymodels` model.
 
 The Tracking component of MLflow can be used to record parameters, metrics and artifacts every time a model is trained. All of this information is presented in a very nice user interface. I'll also finish off here by demonstrating how to serve a model created with Tidymodels, which I find much easier than serving a model created with arbitrary code.
+
+**Update 2021-05-40:** Due to Python packaging issues, I'm no longer able to recreate the content of this blog post. I've hardcoded the results instead. If you're trying to run the code in this blog post, be aware that it may no longer work.
 
 ## Prepare a model
 
@@ -132,13 +134,13 @@ MLflow tracks _artifacts_ along with parameters and metrics. These are any files
 
 I'll set my experiment as `coffee`. I only need to do this once per session:
 
-```{r set-experiment}
+```{r set-experiment, eval=FALSE}
 mlflow_set_experiment(experiment_name = "coffee")
 ```
 
 To actually _do_ an MLflow run, I wrap my model training and evaluation code in a `with(mlflow_start_run(), ...)` block. I insert my logging functions into my training code:
 
-```{r mlflow-run}
+```{r mlflow-run, eval=FALSE}
 with(mlflow_start_run(), {
   fitted_coffee_model <- coffee_workflow %>%
     finalize_workflow(hyperparameters) %>%
@@ -155,12 +157,30 @@ with(mlflow_start_run(), {
   mlflow_save_model(crated_model, here::here("models"))
   mlflow_log_artifact(here::here("models", "crate.bin"))
 })
+#> 2020/08/17 09:09:28 INFO mlflow.store.artifact.cli: Logged artifact from local file /home/mdneuzerling/mdneuzerling.com/models/crate.bin to artifact_path=None
+#> 
+#> Root URI: /home/mdneuzerling/Documents/coffee/mlruns/1/d2bdcbdf3e9849598b393951fa69214c/artifacts
 ```
 
 I can see all the run information, stored as plain text, appearing in my `mlruns` directory now:
 
-```{r mlruns-example}
+```{r mlruns-example, eval=FALSE}
 fs::dir_tree("mlruns/1/f26b040f80244b00882d2925ebdc8396/")
+#> mlruns/1/f26b040f80244b00882d2925ebdc8396/
+#> ├── artifacts
+#> │   └── crate.bin
+#> ├── meta.yaml
+#> ├── metrics
+#> │   ├── mae
+#> │   ├── rmse
+#> │   └── rsq
+#> ├── params
+#> │   ├── mtry
+#> │   └── trees
+#> └── tags
+#>     ├── mlflow.source.name
+#>     ├── mlflow.source.type
+#>     └── mlflow.user
 ```
 
 I have a quibble here: I create an experiment with a name, but MLflow identifies experiments with an integer ID. It would be great if I could write `with(mlflow_start_run(experiment_name = "coffee"), ...)`, but only the `experiment_id` is supported. It's a minor point, but I'm not a fan of having that separate `mlflow_set_experiment` function there because it's a state that I have to manage in a functional language. The other issue here is that while my collaborators and I might all be using the same `experiment_name`, we don't know that we'll be on the same `experiment_id`.

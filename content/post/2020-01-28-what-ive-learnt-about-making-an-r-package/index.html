@@ -1,0 +1,142 @@
+---
+title: What I've learnt about making an R package
+author: ''
+date: '2020-01-28'
+slug: what-ive-learnt-about-making-an-r-package
+categories: []
+tags:
+    - R
+images: ["/img/boxes.jpg"]
+featuredalt: "Two small stacked carboard boxes stacked. This image is used under the Simplified Pixabay License."
+
+---
+
+<script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
+
+
+<p>The last few weeks have been all about R package development for me. First I was exploring GitHub actions with the lovely people at the <a href="https://ozunconf19.ropensci.org/">rOpenSci OzUnconf</a>, and then I was off to San Francisco to learn about <a href="https://github.com/rstudio-conf-2020/build-tidy-tools">Building Tidy Tools with the Wickham siblings</a>. I’ve picked up a lot about package development, so I’m documenting some of trickier things that I’ve learnt.</p>
+<p>A great resource for package development is <a href="http://r-pkgs.had.co.nz/">Hadley’s book</a>. Check it out.</p>
+<div id="general-hints" class="section level2">
+<h2>General hints</h2>
+<ul>
+<li><a href="http://r-pkgs.had.co.nz/namespace.html">There’s a difference between <em>attaching</em> and <em>loading</em> a package</a>. Attaching a package also loads it, and this is what happens when you run the <code>library</code> function.
+<ul>
+<li>I’ve heard it claimed before that it’s inefficient to use double colons like <code>readr::read_csv()</code> because R “loads the package every time”. That’s not true. R loads the package on the first use of a double colon function, but doesn’t attach it. For every call afterwards, that package has <em>already been loaded</em>.</li>
+</ul></li>
+<li>Running <code>devtools::check()</code> (as opposed to <code>R CMD CHECK</code>) will automatically run <code>devtools::document()</code> before the package check <em>if devtools can see that you’re using Roxygen</em>. This isn’t always obvious for a brand new package, so I found that I had to run <code>devtools::document()</code> initially. After that first command, however, <code>devtools::check()</code> started documenting.</li>
+<li>Use the <code>@keywords internal</code> Roxygen tag for documented internal functions, that is, functions without an <code>@export</code> tag. This <a href="http://r-pkgs.had.co.nz/man.html">partially hides the documentation from regular users</a>, while still allowing interested users and developers to access it. <a href="https://twitter.com/mdneuzerling/status/1219402128722137089">Thank you to the #rstats Twitter for helping me out with this one!</a></li>
+<li>If you want to skip the portion of a package check where R connects to CRAN (because you’re behind a proxy or you don’t have an internet connection) run <code>rcmdcheck::rcmdcheck(repos = FALSE)</code>. This lets you continue package development on planes.</li>
+<li>When you use a function like <code>mutate(mtcars, kph = 0.425144 * mpg)</code>, the package check will complain because it’s expecting to see <code>mtcars</code> and <code>mpg</code> as global variables. It’s just a note so you can ignore it, but if you’re like me and interpret notes in package checks as personal attacks, then this <a href="https://stackoverflow.com/questions/9439256/how-can-i-handle-r-cmd-check-no-visible-binding-for-global-variable-notes-when">StackExchange post</a> post has some options.
+<ul>
+<li>Personally, I just add <code>utils::globalVariables(c("mtcars", "mpg"))</code> to a <code>globals.R</code> file in my <code>R</code> folder. If there’s a chance someone else will be looking at your source code, you should add a (non-Roxygen) comment explaining why so they don’t get confused.</li>
+</ul></li>
+<li>If you’re creating a custom package for a <strong>specific</strong> data set, I recommend creating a <code>download_data</code> function that creates the <code>inst/extdata</code> folder and downloads the external data only if it doesn’t already exist. You can add <code>inst/extdata</code> to your <code>.gitignore</code>. This means that you can host your source code but not your data (which may be quite large) on git, without having to worry about doing multiple redundant downloads. This will also let you delete your R Markdown cache without deleting your local data.</li>
+</ul>
+</div>
+<div id="managing-dependencies" class="section level2">
+<h2>Managing dependencies</h2>
+<ul>
+<li>If your package uses another package, add it to your DESCRIPTION file with <code>usethis::use_package(package)</code>. By default, this will add the package to the “Imports” section. This is <em>probably</em> what you want, but you can put it in another section by changing the <code>type</code> argument in <code>use_package</code> to “Depends” or “Suggests”.
+<ul>
+<li>“Imports” in the DESCRIPTION file is <strong>not</strong> the same as “Imports” in the NAMESPACE file. The DESCRIPTION file doesn’t really “import” anything in the namespace sense — it just tells R that those packages should be installed.</li>
+</ul></li>
+<li>Once you’ve added a package to your DESCRIPTION file, you can use it in your functions in one of three ways. They are, <strong>in order of preference</strong> (Thank you to Hadley for confirming this at the workshop):
+<ol style="list-style-type: decimal">
+<li>Use a double colon like <code>dplyr::mutate</code>. This is the preferred option since it doesn’t change the namespace of your package.</li>
+<li>Add a Roxygen tag <code>@ImportFrom</code>, such as <code>@ImportFrom dplyr mutate</code>. This adds the <code>mutate</code> function to the namespace available to your package functions without anything else from the <code>dplyr</code> package. This allows you to use <code>mutate</code> by itself in your package functions. Because this only adds a single function at a time, you’re unlikely to encounter a namespace collision (two objects with the same name in the namespace).</li>
+<li>Add a Roxygen tag <code>@Import</code>, such as <code>@Import dplyr</code>. This adds every function in the <code>dplyr</code> package to the namespace available to your package functions. This isn’t recommended because it makes it very easy to run into a namespace collision.
+<ul>
+<li>Something Hadley said: it’s okay to do this if you’re running a package that’s been <em>explicitly designed</em> to be imported in this manner. For example, tidyverse functions import the entire <code>rlang</code> namespace. It’s also more acceptable to do this if you’re only importing the entire namespace of a <em>single</em> package, since that’s unlikely to lead to conflicts.</li>
+</ul></li>
+</ol></li>
+<li>You can use the same <code>@Import</code> or <code>@ImportFrom</code> multiple times, and Roxygen will only add it once to the NAMESPACE. I like to keep my dependencies close to the functions that use them, so if I need a pipe in many functions I’ll put <code>@ImportFrom magrittr %&gt;%</code> in each file. That’s just my personal preference, though.</li>
+<li>Once you’ve added either an <code>@ImportFrom</code> or <code>@Import</code> tag, you need to <code>devtools::document()</code> for the change to take effect. This will add the relevant lines to your NAMESPACE file. <code>devtools::check()</code> will usually do this for you.
+<ul>
+<li>This often catches me out if I change the NAMESPACE through a Roxygen tag and then re-install the package without running <code>devtools::check()</code>. I get frustrated that my changes aren’t taking effect, until I realise my mistake!</li>
+</ul></li>
+<li>The <code>base</code> package never needs to be explicitly referred to or mentioned in your DESCRIPTION file.
+<ul>
+<li>You <em>do</em> need to explicitly refer to functions and objects from the <code>utils</code> and <code>stats</code> packages, eg. <code>stats::var(c(2, 3, 3, 3, 4))</code>, and put them in your DESCRIPTION file.</li>
+</ul></li>
+<li>Packages used in your vignettes that are not used in your package itself should go in the “Suggests” portion of your namespace, eg. <code>usethis::use_package("ggplot2", type = "Suggests")</code>.</li>
+</ul>
+</div>
+<div id="importing-s3-methods" class="section level2">
+<h2>Importing S3 methods</h2>
+<p>There’s something that still confuses me. Let me preface this by saying that I’m not going to pretend to understand S3.</p>
+<p>Suppose that one of your dependencies uses an S3 method for a generic. For example, the <code>randomForest</code> package has an (unexported) <code>predict.randomForest</code> S3 method that allows you to make predictions with new data using the <code>predict</code> generic. How do you deal with that dependency without importing the whole <code>randomForest</code> namespace?</p>
+<p>I created a quick package to test this out. <a href="https://github.com/mdneuzerling/ImportingRandomForest">You can find it on GitHub</a>.</p>
+<p>The option I went with here is to call on the internal function directly: <code>randomForest:::predict.randomForest()</code>. This works, but you’ll get a note because you’re generally not supposed to use <code>:::</code> in functions. If you’re submitting to CRAN, this could be an issue. Here are the results of <code>R CMD CHECK</code>:</p>
+<pre><code>── R CMD check results ─────────────────── ImportingRandomForest 0.0.0.9000 ────
+Duration: 11.3s
+
+❯ checking dependencies in R code ... NOTE
+  Unexported object imported by a &#39;:::&#39; call: ‘randomForest:::predict.randomForest’
+    See the note in ?`:::` about the use of this operator.
+
+0 errors ✔ | 0 warnings ✔ | 1 note ✖</code></pre>
+<p>Alternatively, the <code>stats::predict</code> generic seems to work with the Roxygen tag <code>@importFrom randomForest randomForest</code>. I feel like this is a fluke — the S3 method is imported as a consequence of importing the <code>randomForest</code> function, but it’s not clear that this is happening. Similarly, <code>@importMethodsFrom randomForest predict.randomForest</code> seems to work, even though R throws a warning that it couldn’t find the method.</p>
+<p>I’d welcome any thoughts on this!</p>
+<hr />
+<p><sub><sup>The featured image for this post is from <a href="https://pixabay.com/photos/boxes-cardboard-gift-box-3404606/">pixabay</a>, and is used under the <a href="https://pixabay.com/service/license/">Simplified Pixabay License</a>.</sup></sub></p>
+<hr />
+<pre class="r"><code>devtools::session_info()</code></pre>
+<pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
+##  setting  value                       
+##  version  R version 4.1.0 (2021-05-18)
+##  os       macOS Big Sur 11.3          
+##  system   aarch64, darwin20           
+##  ui       X11                         
+##  language (EN)                        
+##  collate  en_AU.UTF-8                 
+##  ctype    en_AU.UTF-8                 
+##  tz       Australia/Melbourne         
+##  date     2021-05-30                  
+## 
+## ─ Packages ───────────────────────────────────────────────────────────────────
+##  package     * version date       lib source        
+##  blogdown      1.3     2021-04-14 [1] CRAN (R 4.1.0)
+##  bookdown      0.22    2021-04-22 [1] CRAN (R 4.1.0)
+##  bslib         0.2.5.1 2021-05-18 [1] CRAN (R 4.1.0)
+##  cachem        1.0.4   2021-02-13 [1] CRAN (R 4.1.0)
+##  callr         3.7.0   2021-04-20 [1] CRAN (R 4.1.0)
+##  cli           2.5.0   2021-04-26 [1] CRAN (R 4.1.0)
+##  crayon        1.4.1   2021-02-08 [1] CRAN (R 4.1.0)
+##  desc          1.3.0   2021-03-05 [1] CRAN (R 4.1.0)
+##  devtools      2.4.0   2021-04-07 [1] CRAN (R 4.1.0)
+##  digest        0.6.27  2020-10-24 [1] CRAN (R 4.1.0)
+##  ellipsis      0.3.2   2021-04-29 [1] CRAN (R 4.1.0)
+##  evaluate      0.14    2019-05-28 [1] CRAN (R 4.1.0)
+##  fastmap       1.1.0   2021-01-25 [1] CRAN (R 4.1.0)
+##  fs            1.5.0   2020-07-31 [1] CRAN (R 4.1.0)
+##  glue          1.4.2   2020-08-27 [1] CRAN (R 4.1.0)
+##  htmltools     0.5.1.1 2021-01-22 [1] CRAN (R 4.1.0)
+##  jquerylib     0.1.4   2021-04-26 [1] CRAN (R 4.1.0)
+##  jsonlite      1.7.2   2020-12-09 [1] CRAN (R 4.1.0)
+##  knitr         1.33    2021-04-24 [1] CRAN (R 4.1.0)
+##  lifecycle     1.0.0   2021-02-15 [1] CRAN (R 4.1.0)
+##  magrittr      2.0.1   2020-11-17 [1] CRAN (R 4.1.0)
+##  memoise       2.0.0   2021-01-26 [1] CRAN (R 4.1.0)
+##  pkgbuild      1.2.0   2020-12-15 [1] CRAN (R 4.1.0)
+##  pkgload       1.2.1   2021-04-06 [1] CRAN (R 4.1.0)
+##  prettyunits   1.1.1   2020-01-24 [1] CRAN (R 4.1.0)
+##  processx      3.5.2   2021-04-30 [1] CRAN (R 4.1.0)
+##  ps            1.6.0   2021-02-28 [1] CRAN (R 4.1.0)
+##  purrr         0.3.4   2020-04-17 [1] CRAN (R 4.1.0)
+##  R6            2.5.0   2020-10-28 [1] CRAN (R 4.1.0)
+##  remotes       2.3.0   2021-04-01 [1] CRAN (R 4.1.0)
+##  rlang         0.4.11  2021-04-30 [1] CRAN (R 4.1.0)
+##  rmarkdown     2.8     2021-05-07 [1] CRAN (R 4.1.0)
+##  rprojroot     2.0.2   2020-11-15 [1] CRAN (R 4.1.0)
+##  sass          0.4.0   2021-05-12 [1] CRAN (R 4.1.0)
+##  sessioninfo   1.1.1   2018-11-05 [1] CRAN (R 4.1.0)
+##  stringi       1.6.1   2021-05-10 [1] CRAN (R 4.1.0)
+##  stringr       1.4.0   2019-02-10 [1] CRAN (R 4.1.0)
+##  testthat      3.0.2   2021-02-14 [1] CRAN (R 4.1.0)
+##  usethis       2.0.1   2021-02-10 [1] CRAN (R 4.1.0)
+##  withr         2.4.2   2021-04-18 [1] CRAN (R 4.1.0)
+##  xfun          0.22    2021-03-11 [1] CRAN (R 4.1.0)
+##  yaml          2.2.1   2020-02-01 [1] CRAN (R 4.1.0)
+## 
+## [1] /Library/Frameworks/R.framework/Versions/4.1-arm64/Resources/library</code></pre>
+</div>

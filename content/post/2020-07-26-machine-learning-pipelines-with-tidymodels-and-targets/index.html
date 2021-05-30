@@ -1,0 +1,626 @@
+---
+title: Machine Learning Pipelines with Tidymodels and Targets
+author: ~
+date: '2020-07-26'
+slug: machine-learning-pipelines-with-tidymodels-and-targets
+tags:
+    - R
+images: ["/img/coffee-pipeline.png"]
+
+---
+
+<script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
+
+
+<p>There’s always a need for more <code>tidymodels</code> examples on the Internet. Here’s a simple machine learning model using <a href="https://github.com/rfordatascience/tidytuesday/blob/master/data/2020/2020-07-07/readme.md">the recent <em>coffee</em> Tidy Tuesday data set</a>. The plot above gives the approach: I’ll define some preprocessing and a model, optimise some hyperparameters, and fit and evaluate the result. And I’ll piece all of the components together using <code>targets</code>, an experimental alternative to the <code>drake</code> package that I love so much.</p>
+<p>As usual, I don’t care too much about the model itself. I’m more interested in the process.</p>
+<div id="exploratory-data-analysis" class="section level1">
+<h1>Exploratory data analysis</h1>
+<p>I’ll start with some token data visualisation. I almost always start exploring new data with the <code>visdat</code> package. It lets me see at a glance the data types, as well as any missing data:</p>
+<pre class="r"><code>visdat::vis_dat(coffee)</code></pre>
+<p><img src="{{< blogdown/postref >}}index_files/figure-html/visdat-1.png" width="960" /></p>
+<p>I doubt very much I’ll want to use all of these columns, especially since I only have 1339 rows of data. But some of the columns I do like the look of have missing values, and those will need to be dealt with.</p>
+<p>I’ll be looking at <code>cupper_points</code> as a measure of coffee quality, although I’ve seen some analyses on this data use <code>total_cup_points</code>. The <code>cupper_points</code> score ranges from 0 to 10, presumably with 10 being the best. I was curious which countries produce the best coffee, I made a ggplot that makes use of the <code>ggridges</code> package to produce density plots:</p>
+<pre class="r"><code>coffee %&gt;% 
+  filter(!is.na(country_of_origin)) %&gt;%
+  inner_join(
+    coffee %&gt;%
+      group_by(country_of_origin) %&gt;% 
+      summarise(n = n(), average_cupper_points = mean(cupper_points)) %&gt;%
+      filter(n / sum(n) &gt; 0.01),
+    by = &quot;country_of_origin&quot;
+  ) %&gt;% 
+  ggplot(aes(
+    x = cupper_points,
+    y = fct_reorder(country_of_origin, average_cupper_points),
+    fill = average_cupper_points
+  )) + 
+  ggridges::geom_density_ridges() +
+  xlim(5, 10) +
+  scale_fill_gradient(low = &quot;#A8805C&quot;, high = &quot;#5F3622&quot;) +
+  ggtitle(&quot;Coffee quality by country of origin&quot;) +
+  xlab(&quot;cupper points&quot;) +
+  ylab(NULL) +
+  theme_minimal(base_size = 16) +
+  theme(legend.position = &quot;none&quot;)</code></pre>
+<p><img src="{{< blogdown/postref >}}index_files/figure-html/coffee-plot-1.png" width="960" /></p>
+</div>
+<div id="modelling" class="section level1">
+<h1>Modelling</h1>
+<p>It’s time to make a model! First I’ll generate an 80/20 train/test split:</p>
+<pre class="r"><code>set.seed(123)
+coffee_split &lt;- initial_split(coffee, prop = 0.8)
+coffee_train &lt;- training(coffee_split)
+coffee_test &lt;- testing(coffee_split)</code></pre>
+<p>The split between test and train is sacred. I start a model by splitting out the test data, and then I forget that it exists until it’s time to evaluate my model. If I introduce any information from <code>coffee_test</code> into <code>coffee_train</code> then I can’t trust my model metrics, since I would have no way of knowing if my model is overfitting. This is called <em>data leakage</em>.</p>
+<p>It is very easy to accidentally leak data from test to train. Suppose I have some missing values that I want to impute with the mean. If I impute using the mean of the entire data set, then that’s data leakage. Suppose I scale and centre my numeric variables. I use the mean and variance of the entire data set, then that’s data leakage.</p>
+<p>The usual methods of manipulating data often aren’t suitable for preprocessing modelling data. It’s easy enough to centre and scale a variable with <code>mutate()</code>, but data manipulation for machine learning requires tools that respect the split between test and train. That’s what <code>recipes</code> are for.</p>
+<div id="preprocessing-with-recipes" class="section level2">
+<h2>Preprocessing with recipes</h2>
+<p>In <code>tidymodels</code>, <a href="/post/user-recipes-for-data-processing/">preprocessing is done with recipes</a>. There’s a particular language for preprocessing with <code>recipes</code>, and it follows a common (and cute) theme. A <code>recipe</code> abstractly defines how to manipulate the data. It is then <code>prep</code>ared on a training set, and can be used to <code>bake</code> new data.</p>
+<p>Recipes require an understanding of which variables are predictors and which are outcomes (it would make no sense to preprocess the outcome of the test set). Traditionally in R this is done with a formula, like <code>cupper_points ~ flavour + aroma</code>, or <code>cupper_points ~ .</code> if everything as a predictor. Instead, I’m going to use the “role” approach that <code>recipes</code> takes to declare some variables as predictors and <code>cupper_points</code> as an outcome. The rest will be “support” variables, some of which will be used in imputation. I like this approach, since it means that I don’t need to maintain a list of variables to be fed to the <code>fit</code> function. Instead, the <code>fit</code> function will only use the variables with the “predictor” role.</p>
+<p>The recipe I’ll use defines the steps below. Just a heads up: I’m not claiming that this is <em>good</em> preprocessing. I haven’t even seen what the impact of this preprocessing is on the resulting model. I’m just using this as an example of some preprocessing steps.</p>
+<ol style="list-style-type: decimal">
+<li>Sets the roles of every variable in the data. A variable can have more than one role, but here we’ll call everything either “outcome”, “predictor”, or “support”. <code>tidymodels</code> treats “outcome” and “predictor” variables specially, but otherwise any string can be a role.</li>
+<li>Convert all strings to factors. You read that right.</li>
+<li>Impute <code>country_of_origin</code>, and then <code>altitude_mean_meters</code> using k-nearest-neighbours with a handful of other variables.</li>
+<li>Convert all missing varieties to an “unknown” value.</li>
+<li>Collapse <code>country_of_origin</code>, <code>processing_method</code> and <code>variety</code> levels so that infrequently occurring values are collapsed to “other”.</li>
+<li>Centre and scale all numeric variables.</li>
+</ol>
+<p><a href="https://stackoverflow.com/questions/63008228/tidymodels-tune-grid-cant-subset-columns-that-dont-exist-when-not-using-for">Many thanks to Julia Silge for helping me define this recipe</a>!</p>
+<pre class="r"><code>coffee_recipe &lt;- recipe(coffee_train) %&gt;%
+  update_role(everything(), new_role = &quot;support&quot;) %&gt;% 
+  update_role(cupper_points, new_role = &quot;outcome&quot;) %&gt;%
+  update_role(
+    variety, processing_method, country_of_origin,
+    aroma, flavor, aftertaste, acidity, sweetness, altitude_mean_meters,
+    new_role = &quot;predictor&quot;
+  ) %&gt;%
+  step_string2factor(all_nominal(), -all_outcomes()) %&gt;%
+  step_knnimpute(country_of_origin,
+                 impute_with = imp_vars(
+                 in_country_partner, company, region, farm_name, certification_body
+                 )
+  ) %&gt;%
+  step_knnimpute(altitude_mean_meters,
+                 impute_with = imp_vars(
+                 in_country_partner, company, region, farm_name, certification_body,
+                 country_of_origin
+                 )
+  ) %&gt;%
+  step_unknown(variety, processing_method, new_level = &quot;unknown&quot;) %&gt;%
+  step_other(country_of_origin, threshold = 0.01) %&gt;%
+  step_other(processing_method, variety, threshold = 0.10) %&gt;% 
+  step_normalize(all_numeric(), -all_outcomes())</code></pre>
+<pre><code>## Warning: `step_knnimpute()` was deprecated in recipes 0.1.16.
+## Please use `step_impute_knn()` instead.</code></pre>
+<pre><code>## Warning: `step_knnimpute()` was deprecated in recipes 0.1.16.
+## Please use `step_impute_knn()` instead.</code></pre>
+<pre class="r"><code>coffee_recipe</code></pre>
+<pre><code>## Data Recipe
+## 
+## Inputs:
+## 
+##       role #variables
+##    outcome          1
+##  predictor          9
+##    support         33
+## 
+## Operations:
+## 
+## Factor variables from all_nominal(), -all_outcomes()
+## K-nearest neighbor imputation for country_of_origin
+## K-nearest neighbor imputation for altitude_mean_meters
+## Unknown factor level assignment for variety, processing_method
+## Collapsing factor levels for country_of_origin
+## Collapsing factor levels for processing_method, variety
+## Centering and scaling for all_numeric(), -all_outcomes()</code></pre>
+<p>I won’t actually need to <code>prep</code> or <code>bake</code> anything here, since that’s all handled for me behind the scenes in the <code>workflow</code> step below. But just to demonstrate, I’ll briefly remember that the test data exists and bake it with this recipe. The baked test data below contains no missing <code>processing_method</code> values. It does, however, contain “unknown” and “Other”.</p>
+<pre class="r"><code>coffee_recipe %&gt;% 
+  prep(coffee_train) %&gt;%
+  bake(coffee_test) %&gt;%
+  count(processing_method)</code></pre>
+<pre><code>## # A tibble: 4 x 2
+##   processing_method     n
+##   &lt;fct&gt;             &lt;int&gt;
+## 1 Natural / Dry        47
+## 2 Washed / Wet        175
+## 3 unknown              33
+## 4 other                13</code></pre>
+</div>
+<div id="model-specification" class="section level2">
+<h2>Model specification</h2>
+<p>An issue with R’s distributed package ecosystem is that the same variable can have multiple names across different packages. For example, <code>ranger</code> and <code>randomForest</code> are packages used to train random forests, but where <code>ranger</code> uses <code>num.trees</code> to define the number of trees in the forest, <code>randomForest</code> uses <code>ntree</code>. Under <code>tidymodels</code>, these names are standardised to <code>trees</code>. Moreover, the same standard name is used for other models where “number of trees” is a valid concept, such as boosted trees.</p>
+<p>Note that I’m setting the hyperparameters with <code>tune()</code>, which means that I expect to fill these values in later. Think of <code>tune()</code> as a placeholder. Apart from <code>trees</code>, the other hyperparameter I’m looking at is <code>mtry</code>. When splitting a branch in a random forest, the algorithm doesn’t have access to all of the variables. It’s only provided with a certain number of randomly chosen variables, and it must select the best one to use to split the data. This number of random variables is <code>mtry</code>.</p>
+<p>The “engine” here determines what will be used to fit the model. <code>tidymodels</code> wraps machine learning package, and it has no capacity to train a model by itself. I’m using the <code>ranger</code> package as the engine here, but I could also use the <code>randomForest</code> package.</p>
+<pre class="r"><code>coffee_model &lt;- rand_forest(
+    trees = tune(),
+    mtry = tune()
+  ) %&gt;%
+  set_engine(&quot;ranger&quot;) %&gt;% 
+  set_mode(&quot;regression&quot;)
+coffee_model</code></pre>
+<pre><code>## Random Forest Model Specification (regression)
+## 
+## Main Arguments:
+##   mtry = tune()
+##   trees = tune()
+## 
+## Computational engine: ranger</code></pre>
+<p>I haven’t provided any data to the model specification. Just as in Python’s <code>sklearn</code>, in <code>tidymodels</code> models are defined in a separate step to fitting. The above is just a <em>specification</em> for a model.</p>
+</div>
+<div id="workflows" class="section level2">
+<h2>Workflows</h2>
+<p>A <code>workflow</code> combines a preprocessing recipe and a model specification. By creating a workflow, all of the preprocessing will be handled for me when fitting the model and when generating new predictions.</p>
+<pre class="r"><code>coffee_workflow &lt;- workflow() %&gt;% 
+  add_recipe(coffee_recipe) %&gt;% 
+  add_model(coffee_model)
+coffee_workflow</code></pre>
+<pre><code>## ══ Workflow ════════════════════════════════════════════════════════════════════
+## Preprocessor: Recipe
+## Model: rand_forest()
+## 
+## ── Preprocessor ────────────────────────────────────────────────────────────────
+## 7 Recipe Steps
+## 
+## • step_string2factor()
+## • step_impute_knn()
+## • step_impute_knn()
+## • step_unknown()
+## • step_other()
+## • step_other()
+## • step_normalize()
+## 
+## ── Model ───────────────────────────────────────────────────────────────────────
+## Random Forest Model Specification (regression)
+## 
+## Main Arguments:
+##   mtry = tune()
+##   trees = tune()
+## 
+## Computational engine: ranger</code></pre>
+</div>
+<div id="hyperparameter-tuning" class="section level2">
+<h2>Hyperparameter tuning</h2>
+<p>Earlier I set some hyperparameters with <code>tune()</code>, so I’ll need to explore which values I can assign to them. I’ll create a grid of values to explore. Most of these hyperparameters have sensible defaults, but I’ll define my own to be explicit about what I’m doing.</p>
+<pre class="r"><code>coffee_grid &lt;- expand_grid(mtry = 3:5, trees = seq(500, 1500, by = 200))</code></pre>
+<p>I’ll use cross-validation on <code>coffee_train</code> to evaluate the performance of each combination of hyperparameters.</p>
+<pre class="r"><code>set.seed(123)
+coffee_folds &lt;- vfold_cv(coffee_train, v = 5)
+coffee_folds</code></pre>
+<pre><code>## #  5-fold cross-validation 
+## # A tibble: 5 x 2
+##   splits            id   
+##   &lt;list&gt;            &lt;chr&gt;
+## 1 &lt;split [856/215]&gt; Fold1
+## 2 &lt;split [857/214]&gt; Fold2
+## 3 &lt;split [857/214]&gt; Fold3
+## 4 &lt;split [857/214]&gt; Fold4
+## 5 &lt;split [857/214]&gt; Fold5</code></pre>
+<p>Here’s where I search through the hyperparameter space. With 5 folds and 18 combinations of hyperparameters to explore, R has to train and evaluate 90 models. In general, this sort of tuning takes a while. I could speed this up with parallel processing, but I’m not sure it’s worth the hassle for such a small data set.</p>
+<pre class="r"><code>coffee_grid_results &lt;- coffee_workflow %&gt;% 
+  tune_grid(
+    resamples = coffee_folds,
+    grid = coffee_grid
+  )</code></pre>
+<p>Now it’s time to see how the models performed! I’ll look at root mean squared error to evaluate this model:</p>
+<pre class="r"><code>collect_metrics(coffee_grid_results) %&gt;%
+    filter(.metric == &quot;rmse&quot;) %&gt;% 
+    arrange(mean) %&gt;%
+    head() %&gt;% 
+    knitr::kable()</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="right">mtry</th>
+<th align="right">trees</th>
+<th align="left">.metric</th>
+<th align="left">.estimator</th>
+<th align="right">mean</th>
+<th align="right">n</th>
+<th align="right">std_err</th>
+<th align="left">.config</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">3</td>
+<td align="right">1100</td>
+<td align="left">rmse</td>
+<td align="left">standard</td>
+<td align="right">0.3419094</td>
+<td align="right">5</td>
+<td align="right">0.0502172</td>
+<td align="left">Preprocessor1_Model04</td>
+</tr>
+<tr class="even">
+<td align="right">3</td>
+<td align="right">1300</td>
+<td align="left">rmse</td>
+<td align="left">standard</td>
+<td align="right">0.3420652</td>
+<td align="right">5</td>
+<td align="right">0.0505406</td>
+<td align="left">Preprocessor1_Model05</td>
+</tr>
+<tr class="odd">
+<td align="right">3</td>
+<td align="right">1500</td>
+<td align="left">rmse</td>
+<td align="left">standard</td>
+<td align="right">0.3420793</td>
+<td align="right">5</td>
+<td align="right">0.0504056</td>
+<td align="left">Preprocessor1_Model06</td>
+</tr>
+<tr class="even">
+<td align="right">3</td>
+<td align="right">900</td>
+<td align="left">rmse</td>
+<td align="left">standard</td>
+<td align="right">0.3421492</td>
+<td align="right">5</td>
+<td align="right">0.0505988</td>
+<td align="left">Preprocessor1_Model03</td>
+</tr>
+<tr class="odd">
+<td align="right">3</td>
+<td align="right">500</td>
+<td align="left">rmse</td>
+<td align="left">standard</td>
+<td align="right">0.3423035</td>
+<td align="right">5</td>
+<td align="right">0.0507379</td>
+<td align="left">Preprocessor1_Model01</td>
+</tr>
+<tr class="even">
+<td align="right">3</td>
+<td align="right">700</td>
+<td align="left">rmse</td>
+<td align="left">standard</td>
+<td align="right">0.3428370</td>
+<td align="right">5</td>
+<td align="right">0.0505456</td>
+<td align="left">Preprocessor1_Model02</td>
+</tr>
+</tbody>
+</table>
+<p><code>tidymodels</code> also comes with some nice auto-plotting functionality for model metrics:</p>
+<pre class="r"><code>autoplot(coffee_grid_results, metric = &quot;rmse&quot;)</code></pre>
+<p><img src="{{< blogdown/postref >}}index_files/figure-html/coffee-grid-results-rmse-plot-1.png" width="672" /></p>
+<p>The goal is to minimise RMSE. I can take a look at the hyperparameter combinations that optimise this value:</p>
+<pre class="r"><code>show_best(coffee_grid_results, metric = &quot;rmse&quot;) %&gt;% knitr::kable()</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="right">mtry</th>
+<th align="right">trees</th>
+<th align="left">.metric</th>
+<th align="left">.estimator</th>
+<th align="right">mean</th>
+<th align="right">n</th>
+<th align="right">std_err</th>
+<th align="left">.config</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">3</td>
+<td align="right">1100</td>
+<td align="left">rmse</td>
+<td align="left">standard</td>
+<td align="right">0.3419094</td>
+<td align="right">5</td>
+<td align="right">0.0502172</td>
+<td align="left">Preprocessor1_Model04</td>
+</tr>
+<tr class="even">
+<td align="right">3</td>
+<td align="right">1300</td>
+<td align="left">rmse</td>
+<td align="left">standard</td>
+<td align="right">0.3420652</td>
+<td align="right">5</td>
+<td align="right">0.0505406</td>
+<td align="left">Preprocessor1_Model05</td>
+</tr>
+<tr class="odd">
+<td align="right">3</td>
+<td align="right">1500</td>
+<td align="left">rmse</td>
+<td align="left">standard</td>
+<td align="right">0.3420793</td>
+<td align="right">5</td>
+<td align="right">0.0504056</td>
+<td align="left">Preprocessor1_Model06</td>
+</tr>
+<tr class="even">
+<td align="right">3</td>
+<td align="right">900</td>
+<td align="left">rmse</td>
+<td align="left">standard</td>
+<td align="right">0.3421492</td>
+<td align="right">5</td>
+<td align="right">0.0505988</td>
+<td align="left">Preprocessor1_Model03</td>
+</tr>
+<tr class="odd">
+<td align="right">3</td>
+<td align="right">500</td>
+<td align="left">rmse</td>
+<td align="left">standard</td>
+<td align="right">0.3423035</td>
+<td align="right">5</td>
+<td align="right">0.0507379</td>
+<td align="left">Preprocessor1_Model01</td>
+</tr>
+</tbody>
+</table>
+<p>The issue I have here is that 1500 trees is a lot<a href="#fn1" class="footnote-ref" id="fnref1"><sup>1</sup></a>. When I look at the plot above I can see that 500 trees does pretty well. It may not be the best, but it’s one third as complex.</p>
+<p>I think it’s worth cutting back on accuracy a tiny bit if it means simplifying the model a lot. <code>tidymodels</code> contains a function that does just this. I’ll ask for the combination of hyperparameters that minimises the number of trees in the random forest, while not being more than 5% away from the best combination overall:</p>
+<pre class="r"><code>select_by_pct_loss(coffee_grid_results, metric = &quot;rmse&quot;, limit = 5, trees) %&gt;%
+  knitr::kable()</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="right">mtry</th>
+<th align="right">trees</th>
+<th align="left">.metric</th>
+<th align="left">.estimator</th>
+<th align="right">mean</th>
+<th align="right">n</th>
+<th align="right">std_err</th>
+<th align="left">.config</th>
+<th align="right">.best</th>
+<th align="right">.loss</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">5</td>
+<td align="right">900</td>
+<td align="left">rmse</td>
+<td align="left">standard</td>
+<td align="right">0.3492915</td>
+<td align="right">5</td>
+<td align="right">0.051233</td>
+<td align="left">Preprocessor1_Model15</td>
+<td align="right">0.3419094</td>
+<td align="right">2.159085</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div id="model-fitting" class="section level2">
+<h2>Model fitting</h2>
+<p>I can’t fit a model with undefined hyperparameters. I’ll use the above combination to “finalise” the model. Every hyperparameter that I set to “tune” will be set to the result of <code>select_by_pct_loss</code>.</p>
+<p>That’s everything I need to fit a model. I have a preprocessing recipe, a model specification, and a nice set of hyperparameters. All that’s left to call is <code>fit</code>:</p>
+<pre class="r"><code>fitted_coffee_model &lt;- coffee_workflow %&gt;% 
+  finalize_workflow(
+    select_by_pct_loss(coffee_grid_results, metric = &quot;rmse&quot;, limit = 5, trees)
+  ) %&gt;% 
+  fit(coffee_train)</code></pre>
+</div>
+<div id="model-evaluation" class="section level2">
+<h2>Model evaluation</h2>
+<p>Now that I have a model I can remember that my test set exists. I’ll look at a handful of metrics to see how the model performs. <code>metrics_set(rmse, mae, rsq)</code> is a function that returns a function that compares the true and predicted values. It returns the root mean squared error, mean absolute error, and R squared value.</p>
+<p>I’m using some possibly non-idiomatic R code below. <code>metric_set(rmse, mae, rsq)</code> returns a function, so I can immediately call it as a function. This leads to two sets of parameters in brackets right next to each other. There’s nothing <em>wrong</em> with this, but I don’t know if it’s good practice:</p>
+<pre class="r"><code>fitted_coffee_model %&gt;%
+  predict(coffee_test) %&gt;%
+  metric_set(rmse, mae, rsq)(coffee_test$cupper_points, .pred)</code></pre>
+<pre><code>## # A tibble: 3 x 3
+##   .metric .estimator .estimate
+##   &lt;chr&gt;   &lt;chr&gt;          &lt;dbl&gt;
+## 1 rmse    standard       0.219
+## 2 mae     standard       0.156
+## 3 rsq     standard       0.666</code></pre>
+</div>
+</div>
+<div id="targets" class="section level1">
+<h1>Targets</h1>
+<p>There are a lot of steps involved in fitting and evaluating this model, so it would help to have a way to orchestrate the whole process. <a href="/post/upgrade-your-workflow-with-drake/">Normally I would use the <code>drake</code> package for this</a> but Will Landau, its creator and maintainer, has been working on <a href="https://github.com/wlandau/targets">an alternative called targets</a>. This is an <strong>experimental</strong> package right now, but I thought I’d give it a go for this.</p>
+<p><code>targets</code> will look very familiar to users of <code>drake</code>. <a href="https://wlandau.github.io/targets/articles/need.html">Will has laid out some reasons for creating a separate package</a>. <code>drake</code> uses <em>plans</em>, which are R objects. <code>targets</code> takes a similar approach with its <em>pipelines</em>. However, <code>targets</code> requires that the pipeline be defined in a specific <code>_targets.R</code> file. This file can can also set up required functions and objects for the pipeline, and load necessary packages. The requirement is that it ends with a <code>targets</code> pipeline.</p>
+<p>I’ve put all of the steps required to fit and evaluate this model into a <code>targets</code> pipeline. The recipe is lengthy, and likely to change often as I refine my preprocessing approach. It’s best to create a function <code>define_coffee_recipe</code> and place it in a file somewhere in my project (probably the <code>R/</code> directory). I can then source it it within <code>_targets.R</code>. This way, I can change the preprocessing approach without changing the model pipeline. In a complicated project, it would be best to do this for most of the targets, especially the model definition and metrics.</p>
+<p>A pipeline consists of a set of <code>tar_target</code>s. The first argument of each is a name for the target, and the second is the command that generates the target’s output. Just as with <code>drake</code>, a pipieline should consist of pure functions: no side-effects, with each target defined only by its inputs and its output. This way, <code>targets</code> can automatically detect the dependencies of each target. A convenient consequence of this is that the order in which the targets are provided is irrelevant, as the package is able to work it out from the dependencies alone.</p>
+<p>My <code>_targets.R</code> file with the pipeline is below. Note that the data retrieval step (“coffee”) uses a “never” cue. Like <code>drake</code>, the <code>targets</code> package automatically works out when a step has been invalidated and needs to be rerun. The “never” cue tells <code>targets</code> to never run the “coffee” step unless the result isn’t cached. I can do this because I’m confident that the TidyTuesday data will never change.</p>
+<pre class="r"><code>library(targets)
+source(&quot;R/define_coffee_recipe.R&quot;)
+
+tar_options(packages = c(&quot;tidyverse&quot;, &quot;tidymodels&quot;))
+
+tar_pipeline(
+  tar_target(
+    coffee,
+    tidytuesdayR::tt_load(2020, week = 28)$coffee,
+    cue = tar_cue(&quot;never&quot;)
+  ),
+  tar_target(coffee_split, initial_split(coffee, prop = 0.8)),
+  tar_target(coffee_train, training(coffee_split)),
+  tar_target(coffee_test, testing(coffee_split)),
+  tar_target(coffee_recipe, define_coffee_recipe(coffee_train)),
+  tar_target(
+    coffee_model,
+    rand_forest(
+      trees = tune(),
+      mtry = tune()
+    ) %&gt;% set_engine(&quot;ranger&quot;) %&gt;% set_mode(&quot;regression&quot;)
+  ),
+  tar_target(
+    coffee_workflow,
+    workflow() %&gt;% add_recipe(coffee_recipe) %&gt;% add_model(coffee_model)
+  ),
+  tar_target(
+    coffee_grid,
+    expand_grid(mtry = 3:5, trees = seq(500, 1500, by = 200))
+  ),
+  tar_target(
+    coffee_grid_results,
+    coffee_workflow %&gt;%
+        tune_grid(resamples = vfold_cv(coffee_train, v = 5), grid = coffee_grid)
+  ),
+  tar_target(
+    hyperparameters,
+    select_by_pct_loss(coffee_grid_results, metric = &quot;rmse&quot;, limit = 5, trees)
+  ),
+  tar_target(
+    fitted_coffee_model,
+    coffee_workflow %&gt;% finalize_workflow(hyperparameters) %&gt;% fit(coffee_train)
+  ),
+  tar_target(
+    metrics,
+    fitted_coffee_model %&gt;%
+      predict(coffee_test) %&gt;%
+      metric_set(rmse, mae, rsq)(coffee_test$cupper_points, .pred)
+  )
+)</code></pre>
+<p>As long as this <code>_targets.R</code> file exists in the working directory the <code>targets</code> package will be able to pick it up and use it. The graph at the top of this page was generated with <code>tar_visnetwork()</code> (no argument necessary). The pipeline can be run with <code>tar_make()</code>.</p>
+<p>What I love about this orchestration is that I can see where the dependencies are used. I can be sure that the test data isn’t used for preprocessing, or hyperparameter tuning. And it’s just such a pretty plot!</p>
+<hr />
+<pre class="r"><code>devtools::session_info()</code></pre>
+<pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
+##  setting  value                       
+##  version  R version 4.1.0 (2021-05-18)
+##  os       macOS Big Sur 11.3          
+##  system   aarch64, darwin20           
+##  ui       X11                         
+##  language (EN)                        
+##  collate  en_AU.UTF-8                 
+##  ctype    en_AU.UTF-8                 
+##  tz       Australia/Melbourne         
+##  date     2021-05-30                  
+## 
+## ─ Packages ───────────────────────────────────────────────────────────────────
+##  package      * version    date       lib source        
+##  assertthat     0.2.1      2019-03-21 [1] CRAN (R 4.1.0)
+##  backports      1.2.1      2020-12-09 [1] CRAN (R 4.1.0)
+##  blogdown       1.3        2021-04-14 [1] CRAN (R 4.1.0)
+##  bookdown       0.22       2021-04-22 [1] CRAN (R 4.1.0)
+##  broom        * 0.7.6      2021-04-05 [1] CRAN (R 4.1.0)
+##  bslib          0.2.5.1    2021-05-18 [1] CRAN (R 4.1.0)
+##  cachem         1.0.4      2021-02-13 [1] CRAN (R 4.1.0)
+##  callr          3.7.0      2021-04-20 [1] CRAN (R 4.1.0)
+##  cellranger     1.1.0      2016-07-27 [1] CRAN (R 4.1.0)
+##  class          7.3-19     2021-05-03 [1] CRAN (R 4.1.0)
+##  cli            2.5.0      2021-04-26 [1] CRAN (R 4.1.0)
+##  codetools      0.2-18     2020-11-04 [1] CRAN (R 4.1.0)
+##  colorspace     2.0-1      2021-05-04 [1] CRAN (R 4.1.0)
+##  crayon         1.4.1      2021-02-08 [1] CRAN (R 4.1.0)
+##  data.table     1.14.0     2021-02-21 [1] CRAN (R 4.1.0)
+##  DBI            1.1.1      2021-01-15 [1] CRAN (R 4.1.0)
+##  dbplyr         2.1.1      2021-04-06 [1] CRAN (R 4.1.0)
+##  desc           1.3.0      2021-03-05 [1] CRAN (R 4.1.0)
+##  devtools       2.4.0      2021-04-07 [1] CRAN (R 4.1.0)
+##  dials        * 0.0.9      2020-09-16 [1] CRAN (R 4.1.0)
+##  DiceDesign     1.9        2021-02-13 [1] CRAN (R 4.1.0)
+##  digest         0.6.27     2020-10-24 [1] CRAN (R 4.1.0)
+##  dplyr        * 1.0.5      2021-03-05 [1] CRAN (R 4.1.0)
+##  ellipsis       0.3.2      2021-04-29 [1] CRAN (R 4.1.0)
+##  evaluate       0.14       2019-05-28 [1] CRAN (R 4.1.0)
+##  fansi          0.4.2      2021-01-15 [1] CRAN (R 4.1.0)
+##  farver         2.1.0      2021-02-28 [1] CRAN (R 4.1.0)
+##  fastmap        1.1.0      2021-01-25 [1] CRAN (R 4.1.0)
+##  forcats      * 0.5.1      2021-01-27 [1] CRAN (R 4.1.0)
+##  foreach        1.5.1      2020-10-15 [1] CRAN (R 4.1.0)
+##  fs             1.5.0      2020-07-31 [1] CRAN (R 4.1.0)
+##  furrr          0.2.2      2021-01-29 [1] CRAN (R 4.1.0)
+##  future         1.21.0     2020-12-10 [1] CRAN (R 4.1.0)
+##  generics       0.1.0      2020-10-31 [1] CRAN (R 4.1.0)
+##  ggplot2      * 3.3.3      2020-12-30 [1] CRAN (R 4.1.0)
+##  ggridges       0.5.3      2021-01-08 [1] CRAN (R 4.1.0)
+##  globals        0.14.0     2020-11-22 [1] CRAN (R 4.1.0)
+##  glue           1.4.2      2020-08-27 [1] CRAN (R 4.1.0)
+##  gower          0.2.2      2020-06-23 [1] CRAN (R 4.1.0)
+##  GPfit          1.0-8      2019-02-08 [1] CRAN (R 4.1.0)
+##  gtable         0.3.0      2019-03-25 [1] CRAN (R 4.1.0)
+##  hardhat        0.1.5      2020-11-09 [1] CRAN (R 4.1.0)
+##  haven          2.4.1      2021-04-23 [1] CRAN (R 4.1.0)
+##  highr          0.9        2021-04-16 [1] CRAN (R 4.1.0)
+##  hms            1.0.0      2021-01-13 [1] CRAN (R 4.1.0)
+##  htmltools      0.5.1.1    2021-01-22 [1] CRAN (R 4.1.0)
+##  httr           1.4.2      2020-07-20 [1] CRAN (R 4.1.0)
+##  igraph         1.2.6      2020-10-06 [1] CRAN (R 4.1.0)
+##  infer        * 0.5.4      2021-01-13 [1] CRAN (R 4.1.0)
+##  ipred          0.9-11     2021-03-12 [1] CRAN (R 4.1.0)
+##  iterators      1.0.13     2020-10-15 [1] CRAN (R 4.1.0)
+##  jquerylib      0.1.4      2021-04-26 [1] CRAN (R 4.1.0)
+##  jsonlite       1.7.2      2020-12-09 [1] CRAN (R 4.1.0)
+##  knitr          1.33       2021-04-24 [1] CRAN (R 4.1.0)
+##  labeling       0.4.2      2020-10-20 [1] CRAN (R 4.1.0)
+##  lattice        0.20-44    2021-05-02 [1] CRAN (R 4.1.0)
+##  lava           1.6.9      2021-03-11 [1] CRAN (R 4.1.0)
+##  lhs            1.1.1      2020-10-05 [1] CRAN (R 4.1.0)
+##  lifecycle      1.0.0      2021-02-15 [1] CRAN (R 4.1.0)
+##  listenv        0.8.0      2019-12-05 [1] CRAN (R 4.1.0)
+##  lubridate      1.7.10     2021-02-26 [1] CRAN (R 4.1.0)
+##  magrittr       2.0.1      2020-11-17 [1] CRAN (R 4.1.0)
+##  MASS           7.3-54     2021-05-03 [1] CRAN (R 4.1.0)
+##  Matrix         1.3-3      2021-05-04 [1] CRAN (R 4.1.0)
+##  memoise        2.0.0      2021-01-26 [1] CRAN (R 4.1.0)
+##  modeldata    * 0.1.0      2020-10-22 [1] CRAN (R 4.1.0)
+##  modelr         0.1.8      2020-05-19 [1] CRAN (R 4.1.0)
+##  munsell        0.5.0      2018-06-12 [1] CRAN (R 4.1.0)
+##  nnet           7.3-16     2021-05-03 [1] CRAN (R 4.1.0)
+##  parallelly     1.25.0     2021-04-30 [1] CRAN (R 4.1.0)
+##  parsnip      * 0.1.6      2021-05-27 [1] CRAN (R 4.1.0)
+##  pillar         1.6.1      2021-05-16 [1] CRAN (R 4.1.0)
+##  pkgbuild       1.2.0      2020-12-15 [1] CRAN (R 4.1.0)
+##  pkgconfig      2.0.3      2019-09-22 [1] CRAN (R 4.1.0)
+##  pkgload        1.2.1      2021-04-06 [1] CRAN (R 4.1.0)
+##  plyr           1.8.6      2020-03-03 [1] CRAN (R 4.1.0)
+##  prettyunits    1.1.1      2020-01-24 [1] CRAN (R 4.1.0)
+##  pROC           1.17.0.1   2021-01-13 [1] CRAN (R 4.1.0)
+##  processx       3.5.2      2021-04-30 [1] CRAN (R 4.1.0)
+##  prodlim        2019.11.13 2019-11-17 [1] CRAN (R 4.1.0)
+##  ps             1.6.0      2021-02-28 [1] CRAN (R 4.1.0)
+##  purrr        * 0.3.4      2020-04-17 [1] CRAN (R 4.1.0)
+##  R6             2.5.0      2020-10-28 [1] CRAN (R 4.1.0)
+##  ranger         0.12.1     2020-01-10 [1] CRAN (R 4.1.0)
+##  Rcpp           1.0.6      2021-01-15 [1] CRAN (R 4.1.0)
+##  readr        * 1.4.0      2020-10-05 [1] CRAN (R 4.1.0)
+##  readxl         1.3.1      2019-03-13 [1] CRAN (R 4.1.0)
+##  recipes      * 0.1.16     2021-04-16 [1] CRAN (R 4.1.0)
+##  remotes        2.3.0      2021-04-01 [1] CRAN (R 4.1.0)
+##  reprex         2.0.0      2021-04-02 [1] CRAN (R 4.1.0)
+##  rlang          0.4.11     2021-04-30 [1] CRAN (R 4.1.0)
+##  rmarkdown      2.8        2021-05-07 [1] CRAN (R 4.1.0)
+##  rpart          4.1-15     2019-04-12 [1] CRAN (R 4.1.0)
+##  rprojroot      2.0.2      2020-11-15 [1] CRAN (R 4.1.0)
+##  rsample      * 0.1.0      2021-05-08 [1] CRAN (R 4.1.0)
+##  rstudioapi     0.13       2020-11-12 [1] CRAN (R 4.1.0)
+##  rvest          1.0.0      2021-03-09 [1] CRAN (R 4.1.0)
+##  sass           0.4.0      2021-05-12 [1] CRAN (R 4.1.0)
+##  scales       * 1.1.1      2020-05-11 [1] CRAN (R 4.1.0)
+##  sessioninfo    1.1.1      2018-11-05 [1] CRAN (R 4.1.0)
+##  stringi        1.6.1      2021-05-10 [1] CRAN (R 4.1.0)
+##  stringr      * 1.4.0      2019-02-10 [1] CRAN (R 4.1.0)
+##  survival       3.2-11     2021-04-26 [1] CRAN (R 4.1.0)
+##  targets      * 0.4.2      2021-04-30 [1] CRAN (R 4.1.0)
+##  testthat       3.0.2      2021-02-14 [1] CRAN (R 4.1.0)
+##  tibble       * 3.1.2      2021-05-16 [1] CRAN (R 4.1.0)
+##  tidymodels   * 0.1.3      2021-04-19 [1] CRAN (R 4.1.0)
+##  tidyr        * 1.1.3      2021-03-03 [1] CRAN (R 4.1.0)
+##  tidyselect     1.1.1      2021-04-30 [1] CRAN (R 4.1.0)
+##  tidyverse    * 1.3.1      2021-04-15 [1] CRAN (R 4.1.0)
+##  timeDate       3043.102   2018-02-21 [1] CRAN (R 4.1.0)
+##  tune         * 0.1.5      2021-04-23 [1] CRAN (R 4.1.0)
+##  usethis        2.0.1      2021-02-10 [1] CRAN (R 4.1.0)
+##  utf8           1.2.1      2021-03-12 [1] CRAN (R 4.1.0)
+##  vctrs          0.3.8      2021-04-29 [1] CRAN (R 4.1.0)
+##  visdat         0.5.3      2019-02-15 [1] CRAN (R 4.1.0)
+##  withr          2.4.2      2021-04-18 [1] CRAN (R 4.1.0)
+##  workflows    * 0.2.2      2021-03-10 [1] CRAN (R 4.1.0)
+##  workflowsets * 0.0.2      2021-04-16 [1] CRAN (R 4.1.0)
+##  xfun           0.22       2021-03-11 [1] CRAN (R 4.1.0)
+##  xml2           1.3.2      2020-04-23 [1] CRAN (R 4.1.0)
+##  yaml           2.2.1      2020-02-01 [1] CRAN (R 4.1.0)
+##  yardstick    * 0.0.8      2021-03-28 [1] CRAN (R 4.1.0)
+## 
+## [1] /Library/Frameworks/R.framework/Versions/4.1-arm64/Resources/library</code></pre>
+</div>
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn1"><p>Adding more trees to a random forest doesn’t make the model overfit, or have any other detriment on model performance. But additional trees do carry a computational cost, in both model training and prediction. It’s good to keep the number as low as possible without harming model performance.<a href="#fnref1" class="footnote-back">↩︎</a></p></li>
+</ol>
+</div>

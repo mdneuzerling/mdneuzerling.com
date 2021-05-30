@@ -6,7 +6,7 @@ slug: hosting-a-plumber-api-with-kubernetes
 tags:
     - kubernetes
 images: ["/img/kubernetes.png"]
-output: hugodown::md_document
+
 ---
     
 ```{r setup, include=FALSE}

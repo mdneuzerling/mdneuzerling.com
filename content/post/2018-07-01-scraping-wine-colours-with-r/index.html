@@ -1,0 +1,473 @@
+---
+title: Scraping wine colours with R
+author: ''
+date: '2018-07-01'
+slug: scraping-wine-colours-with-r
+tags:
+    - R
+    - scraping
+images: ["/img/grapes.jpeg"]
+featuredalt: "grapes"
+
+---
+
+<script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
+
+
+<p>My knowledge of wine covers three facts:</p>
+<ol style="list-style-type: decimal">
+<li>I like red wine.</li>
+<li>I do not like white wine.</li>
+<li>I love wine <em>data</em>.</li>
+</ol>
+<p>I came across a great collection of around 130,000 wine reviews, each a
+paragraph long, on <a href="https://www.kaggle.com/zynicide/wine-reviews">Kaggle</a>.
+This is juicy stuff, and I can’t wait to dig into it with some text analysis,
+or maybe build some sort of markov chain or neural network that generates new
+wine reviews.</p>
+<p>But I wanted to start with something simple—a little bit of feature
+engineering. There’s around 700 different <em>varieties</em> (eg. merlot, riesling)
+in here, and I thought it would be easy to add on whether or not they were
+red, white or rosé.</p>
+<p>It was not.</p>
+<p>I won’t show you all the failed attempts; I’ll just focus on what worked in the
+end. This is the process:</p>
+<ol style="list-style-type: decimal">
+<li>Scrape wine colour data from Wikipedia</li>
+<li>Join the colours with the wine varieties</li>
+<li>Fix errors and duplicates</li>
+<li>Improve the wine colour data, and repeat</li>
+<li>When all else fails, manually classify what remains.</li>
+</ol>
+<p>Classifying wine into three simple categories is a tough ask, and I can hear the
+connoisseurs tutting at me. Some grapes can be red and white, and I’m told that
+there’s such a thing as “orange” wine (and no, it’s not made from
+oranges—I did ask). Dessert wines and sparkling wines can probably be
+classified as red or white, but really they’re off doing their own thing. I
+acknowledge how aggressive this classification is, but I’m going to charge
+ahead anyway.</p>
+<div id="quick-look-at-the-data" class="section level2">
+<h2>Quick look at the data</h2>
+<pre class="r"><code>knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
+
+set.seed(42275) # Chosen by fair dice roll. Guaranteed to be random.
+ 
+library(tidyverse)
+library(ggplot2) 
+library(rvest)
+
+red_wine_colour &lt;- &quot;#59121C&quot;
+white_wine_colour &lt;- &quot;#EADB9F&quot;
+rose_wine_colour &lt;- &quot;#F5C0A2&quot;
+
+wine &lt;- &quot;wine_reviews.csv&quot; %&gt;% 
+    read_csv %&gt;% 
+    mutate(variety = variety %&gt;% tolower)
+
+wine %&gt;% str</code></pre>
+<pre><code>## spec_tbl_df [129,971 × 14] (S3: spec_tbl_df/tbl_df/tbl/data.frame)
+##  $ X1                   : num [1:129971] 0 1 2 3 4 5 6 7 8 9 ...
+##  $ country              : chr [1:129971] &quot;Italy&quot; &quot;Portugal&quot; &quot;US&quot; &quot;US&quot; ...
+##  $ description          : chr [1:129971] &quot;Aromas include tropical fruit, broom, brimstone and dried herb. The palate isn&#39;t overly expressive, offering un&quot;| __truncated__ &quot;This is ripe and fruity, a wine that is smooth while still structured. Firm tannins are filled out with juicy r&quot;| __truncated__ &quot;Tart and snappy, the flavors of lime flesh and rind dominate. Some green pineapple pokes through, with crisp ac&quot;| __truncated__ &quot;Pineapple rind, lemon pith and orange blossom start off the aromas. The palate is a bit more opulent, with note&quot;| __truncated__ ...
+##  $ designation          : chr [1:129971] &quot;Vulkà Bianco&quot; &quot;Avidagos&quot; NA &quot;Reserve Late Harvest&quot; ...
+##  $ points               : num [1:129971] 87 87 87 87 87 87 87 87 87 87 ...
+##  $ price                : num [1:129971] NA 15 14 13 65 15 16 24 12 27 ...
+##  $ province             : chr [1:129971] &quot;Sicily &amp; Sardinia&quot; &quot;Douro&quot; &quot;Oregon&quot; &quot;Michigan&quot; ...
+##  $ region_1             : chr [1:129971] &quot;Etna&quot; NA &quot;Willamette Valley&quot; &quot;Lake Michigan Shore&quot; ...
+##  $ region_2             : chr [1:129971] NA NA &quot;Willamette Valley&quot; NA ...
+##  $ taster_name          : chr [1:129971] &quot;Kerin O’Keefe&quot; &quot;Roger Voss&quot; &quot;Paul Gregutt&quot; &quot;Alexander Peartree&quot; ...
+##  $ taster_twitter_handle: chr [1:129971] &quot;@kerinokeefe&quot; &quot;@vossroger&quot; &quot;@paulgwine &quot; NA ...
+##  $ title                : chr [1:129971] &quot;Nicosia 2013 Vulkà Bianco  (Etna)&quot; &quot;Quinta dos Avidagos 2011 Avidagos Red (Douro)&quot; &quot;Rainstorm 2013 Pinot Gris (Willamette Valley)&quot; &quot;St. Julian 2013 Reserve Late Harvest Riesling (Lake Michigan Shore)&quot; ...
+##  $ variety              : chr [1:129971] &quot;white blend&quot; &quot;portuguese red&quot; &quot;pinot gris&quot; &quot;riesling&quot; ...
+##  $ winery               : chr [1:129971] &quot;Nicosia&quot; &quot;Quinta dos Avidagos&quot; &quot;Rainstorm&quot; &quot;St. Julian&quot; ...
+##  - attr(*, &quot;spec&quot;)=
+##   .. cols(
+##   ..   X1 = col_double(),
+##   ..   country = col_character(),
+##   ..   description = col_character(),
+##   ..   designation = col_character(),
+##   ..   points = col_double(),
+##   ..   price = col_double(),
+##   ..   province = col_character(),
+##   ..   region_1 = col_character(),
+##   ..   region_2 = col_character(),
+##   ..   taster_name = col_character(),
+##   ..   taster_twitter_handle = col_character(),
+##   ..   title = col_character(),
+##   ..   variety = col_character(),
+##   ..   winery = col_character()
+##   .. )</code></pre>
+<p>I think this data will keep me entertained for a while. There’s a lot to dig
+into here, and those reviews are going to be interesting when I can pull them
+apart. For example, 7
+wines are described as tasting of tennis balls, and these wines are rated
+about average. It makes me think that I’m not spending enough time in life
+appreciating the taste of tennis balls. Dogs understand this.</p>
+<p>Speaking of points, it appears as though wines are ranked on a scale from 80
+to 100. Although, looking at the plot below, you’d be forgiven for thinking that
+the scale is from 80 to 97. Only 0.01% of wines make it to a rating of 100.</p>
+<pre class="r"><code>wine %&gt;% ggplot(aes(x = points)) + 
+    geom_histogram(
+        bins = nrow(wine %&gt;% distinct(points)),
+        colour = &quot;white&quot;,
+        fill = red_wine_colour
+    )</code></pre>
+<p><img src="{{< blogdown/postref >}}index_files/figure-html/points-1.png" width="672" /></p>
+<p>The review below is for an 80-point wine, and it’s certainly one of my
+favourite descriptions:</p>
+<pre class="r"><code>wine %&gt;% 
+    filter(X1 == 11086) %&gt;% 
+    select(description) %&gt;% 
+    paste0(&#39;&gt; &#39;, .) %&gt;% # print as quote
+    cat</code></pre>
+<blockquote>
+<p>Picture grandma standing over a pot of stewed prunes, which fill the dusty old house with their sickly aromas. Cooked, earthy and rustic, this wine has little going for it. Just barely acceptable.</p>
+</blockquote>
+<p>One wine, indexed 86909, has a missing variety. Fortunately, we can recover the
+information from the review:</p>
+<pre class="r"><code>wine %&gt;% 
+    filter(X1 == 86909) %&gt;% 
+    select(description) %&gt;% 
+    paste0(&#39;&gt; &#39;, .) %&gt;% # print as quote
+    cat</code></pre>
+<blockquote>
+<p>A chalky, dusty mouthfeel nicely balances this Petite Syrah’s bright, full blackberry and blueberry fruit. Wheat-flour and black-pepper notes add interest to the bouquet; the wine finishes with herb and an acorny nuttiness. A good first Chilean wine for those more comfortable with the Californian style. It’s got tannins to lose, but it’s very good.</p>
+</blockquote>
+<pre class="r"><code>wine &lt;- wine %&gt;% mutate(
+  variety = ifelse(X1 == 86909, &quot;petite syrah&quot;, variety)
+)</code></pre>
+</div>
+<div id="scraping-wikipedia" class="section level2">
+<h2>Scraping Wikipedia</h2>
+<p>In order to classify the wines as red, white or rosé, we’re going to scrape
+wine data from the <a href="https://en.wikipedia.org/wiki/List_of_grape_varieties">List of grape varieties</a>
+Wikipedia page, using the <code>rvest</code> package. The first three tables of this page
+give red, white and rosé wines, in that order.</p>
+<p>We’re going to use an older version of the article, dated 2018-06-29, for
+consistency. Wikipedia displays a notice that the user is reading an older
+version of the article. This counts as a table, and so the code below refers to
+tables 2, 3 and 4. If using the live version, replace these figures with 1, 2
+and 3.</p>
+<pre class="r"><code># Use an old revision of the article for consistency
+wiki_tables &lt;- &quot;https://en.wikipedia.org/w/index.php?title=List_of_grape_varieties&amp;oldid=847983339&quot; %&gt;% 
+    read_html %&gt;% 
+    html_nodes(&quot;table&quot;)
+red_wines &lt;- wiki_tables[[1]] %&gt;% html_table %&gt;% cbind(colour = &quot;red&quot;)
+white_wines &lt;- wiki_tables[[2]] %&gt;% html_table %&gt;% cbind(colour = &quot;white&quot;)
+rose_wines &lt;- wiki_tables[[3]] %&gt;% html_table %&gt;% cbind(colour = &quot;rosé&quot;)
+all_wines &lt;- rbind(red_wines, white_wines, rose_wines)
+all_wines %&gt;% 
+    select(`Common Name(s)`, `All Synonyms`, colour) %&gt;% 
+    head(1)</code></pre>
+<pre><code>##   Common Name(s)   All Synonyms colour
+## 1        Abbuoto Aboto, Cecubo.    red</code></pre>
+<p>We’re interested in three columns here: <code>Common Name(s)</code>, <code>All Synonyms</code> and
+the <code>colour</code> column we defined from the table scraping. We will take the
+opportunity to rename the columns to match the tidyverse style.</p>
+<p>Apart from synonyms, some wines can also have multiple common names, eg.
+“shiraz / syrah”. The synonyms seem to be very broad, and can include some
+unexpected results: pinot grigio (also known as pinot gris) is used to produce
+white wine, yet it appears as a synonym to canari noir, which is used to make
+red wine.</p>
+<p>We’re going to preference the common names over the synonyms, so that in any
+conflict we use the colour as given by the common name. To do this, we’re going
+to <code>unnest</code> the common names and clean the results so that all entries are in
+lower-case, the results are distinct, and certain stray bits of punctuation are
+removed. We’re then going to do the same with the synonyms, but when we combine
+the results we will ignore all entries that are already provided by the common
+names.</p>
+<p>The end result will be a single table with two columns: <code>variety</code>, and <code>colour</code>.
+The table may very well still contain duplicates, but certainly less than we
+would have had if we had treated common names and synonyms as equals.</p>
+<pre class="r"><code>all_wines_cleaned &lt;- all_wines %&gt;% 
+    rename(
+        common_names = `Common Name(s)`,
+        synonyms = `All Synonyms`
+    ) %&gt;% 
+    mutate_all(tolower) %&gt;% 
+    select(common_names, synonyms, colour)
+
+common_names &lt;- all_wines_cleaned %&gt;%
+    unnest(common_names = strsplit(common_names, &quot; / &quot;)) %&gt;% # split common names into separate rows
+    rename(variety = common_names) %&gt;% 
+    mutate(
+        variety = gsub(&quot;\\.&quot;, &quot;&quot;, variety), # remove periods 
+        variety = gsub(&quot;\\s*\\([^\\)]+\\)&quot;, &quot;&quot;, variety), # remove brackets and anything within
+        variety = gsub(&quot;\\s*\\[[^\\)]+\\]&quot;, &quot;&quot;, variety) # same for square brackets
+    ) %&gt;% 
+    select(variety, colour)</code></pre>
+<pre><code>## Warning: unnest() has a new interface. See ?unnest for details.
+## Try `df %&gt;% unnest(c(common_names))`, with `mutate()` if needed</code></pre>
+<pre class="r"><code>synonyms &lt;- all_wines_cleaned %&gt;% 
+    unnest(synonyms = strsplit(synonyms, &quot;, &quot;)) %&gt;% # split the synonyms into multiple rows
+    rename(variety = synonyms) %&gt;% 
+    mutate(
+        variety = gsub(&quot;\\.&quot;, &quot;&quot;, variety), # remove periods 
+        variety = gsub(&quot;\\s*\\([^\\)]+\\)&quot;, &quot;&quot;, variety), # remove brackets and anything within
+        variety = gsub(&quot;\\s*\\[[^\\)]+\\]&quot;, &quot;&quot;, variety) # same for square brackets
+    ) %&gt;% 
+    select(variety, colour) %&gt;% 
+    anti_join(common_names, by = &quot;variety&quot;) # remove synonyms if we have a common name</code></pre>
+<pre><code>## Warning: unnest() has a new interface. See ?unnest for details.
+## Try `df %&gt;% unnest(c(synonyms))`, with `mutate()` if needed</code></pre>
+<pre class="r"><code>variety_colours &lt;- rbind(common_names, synonyms) %&gt;% 
+    distinct %&gt;% 
+    arrange(variety)
+
+variety_colours %&gt;% head</code></pre>
+<pre><code>## # A tibble: 6 x 2
+##   variety             colour
+##   &lt;chr&gt;               &lt;chr&gt; 
+## 1 &quot; barbera dolce&quot;    red   
+## 2 &quot; cosses barbusen&quot;  red   
+## 3 &quot; limberger blauer&quot; red   
+## 4 &quot;22 a baco&quot;         white 
+## 5 &quot;abbondosa&quot;         white 
+## 6 &quot;abboudossa&quot;        white</code></pre>
+<p>The end result is 8469 rows, with plenty of repeated
+entries to accommodate for multiple names or variations in spelling.</p>
+</div>
+<div id="joining-the-colour-data" class="section level2">
+<h2>Joining the colour data</h2>
+<p>Now we join the colours with the wine data. If there are any missing values, we
+can attempt to fill them in based on obvious clues in the variety (eg. a “Red
+blend” can safely be assumed to be a red wine). We’re going to repeat this
+join as we iteratively improve the <code>variety_colours</code> data, so we’ll define it
+as a function.</p>
+<pre class="r"><code>join_with_variety_colours &lt;- function(wine, variety_colours) {
+    wine %&gt;% 
+        left_join(
+            variety_colours %&gt;% select(variety, colour),
+            by = &quot;variety&quot;
+        ) %&gt;% 
+        mutate(
+            colour = case_when(
+                !is.na(colour) ~ colour,
+                grepl(&quot;sparkling&quot;, variety, ignore.case = TRUE) ~ &quot;white&quot;,
+                grepl(&quot;champagne&quot;, variety, ignore.case = TRUE) ~ &quot;white&quot;,
+                grepl(&quot;red&quot;, variety, ignore.case = TRUE) ~ &quot;red&quot;,
+                grepl(&quot;white&quot;, variety, ignore.case = TRUE) ~ &quot;white&quot;,
+                grepl(&quot;rosé&quot;, variety, ignore.case = TRUE) ~ &quot;rosé&quot;,
+                grepl(&quot;rose&quot;, variety, ignore.case = TRUE) ~ &quot;rosé&quot;
+            )
+        )
+}
+
+wine_colours &lt;- wine %&gt;% join_with_variety_colours(variety_colours)
+
+plot_wine_colours &lt;- function(wine_colours) {
+    wine_colours %&gt;% 
+    ggplot(aes(x = colour, fill = colour)) + 
+    geom_bar() + 
+    scale_fill_manual(values = c(
+        &quot;red&quot; = red_wine_colour, 
+        &quot;white&quot; = white_wine_colour, 
+        &quot;rosé&quot; = rose_wine_colour),
+        na.value = &quot;grey&quot;
+    ) + 
+    ggtitle(&quot;Wine colours&quot;) +
+    theme(legend.position=&quot;none&quot;)
+}
+
+plot_wine_colours(wine_colours)</code></pre>
+<p><img src="{{< blogdown/postref >}}index_files/figure-html/join_with_variety_colours-1.png" width="672" /></p>
+<p>All but 6734 wines have been
+classified. We still have some colours missing, but first we consider the wines
+that have been classified as multiple colours:</p>
+<pre class="r"><code>wine_colours %&gt;% 
+    distinct(variety, colour) %&gt;% 
+    count(variety) %&gt;% 
+    filter(n &gt; 1)</code></pre>
+<pre><code>## # A tibble: 4 x 2
+##   variety           n
+##   &lt;chr&gt;         &lt;int&gt;
+## 1 alicante          2
+## 2 grignolino        2
+## 3 malvasia fina     2
+## 4 sauvignon         2</code></pre>
+<p>We use web searches to manually classify the varieties based on the colour of
+the wine that is most often produced from them.</p>
+<pre class="r"><code>variety_colours &lt;- variety_colours %&gt;% 
+    filter(!(variety == &quot;alicante&quot; &amp; colour != &quot;red&quot;)) %&gt;%     
+    filter(!(variety == &quot;grignolino&quot; &amp; colour != &quot;red&quot;)) %&gt;% 
+    filter(!(variety == &quot;malvasia fina&quot; &amp; colour != &quot;white&quot;)) %&gt;% # rarely red
+    filter(!(variety == &quot;sauvignon&quot; &amp; colour != &quot;white&quot;))</code></pre>
+<p>The below suggests that blends are not being classified:</p>
+<pre class="r"><code>wine_colours %&gt;% 
+    filter(is.na(colour)) %&gt;% 
+    count(variety, sort = TRUE) %&gt;% 
+    head(10)</code></pre>
+<pre><code>## # A tibble: 10 x 2
+##    variety                           n
+##    &lt;chr&gt;                         &lt;int&gt;
+##  1 port                            668
+##  2 corvina, rondinella, molinara   619
+##  3 tempranillo blend               588
+##  4 carmenère                       575
+##  5 meritage                        260
+##  6 g-s-m                           181
+##  7 mencía                          178
+##  8 cabernet sauvignon-merlot       117
+##  9 nerello mascalese               117
+## 10 rosato                          103</code></pre>
+<p>We operate under the assumption that if multiple wines are listed, the first
+wine determines the colour. For example, cabernet is red and sauvignon is white,
+but cabernet sauvignon is red. We try to classify the unclassified wines again
+but using only the first word in their varieties. We split the variety by either
+spaces or dashes.</p>
+<pre class="r"><code>blend_colours &lt;- 
+    wine_colours %&gt;% 
+    filter(is.na(colour)) %&gt;% 
+    select(variety) %&gt;% 
+    rowwise %&gt;% 
+    mutate(first_variety = unlist(strsplit(variety, &quot;\\-|\\ | &quot;))[1]) %&gt;% 
+    merge(variety_colours, by.x = &quot;first_variety&quot;, by.y = &quot;variety&quot;) %&gt;% 
+    select(variety, colour) %&gt;% 
+    distinct</code></pre>
+<p>Now we can rebuild the wine colours using these new blend results:</p>
+<pre class="r"><code>wine_colours &lt;- wine %&gt;% join_with_variety_colours(
+    rbind(variety_colours, blend_colours)
+) 
+
+plot_wine_colours(wine_colours)</code></pre>
+<p><img src="{{< blogdown/postref >}}index_files/figure-html/join_with_blend_colours-1.png" width="672" /></p>
+<p>All but 4091 wines have been
+classified. This is an improvement, but we still have to classify the rest.</p>
+</div>
+<div id="manual-classifications" class="section level2">
+<h2>Manual classifications</h2>
+<p>We manually classify the remaining
+154
+varieties using web searches or the <code>description</code>s (reviews) associated with
+the wines.</p>
+<pre class="r"><code>manual_colours &lt;- &quot;manually_classified.csv&quot; %&gt;% read_csv</code></pre>
+<pre><code>## 
+## ── Column specification ────────────────────────────────────────────────────────
+## cols(
+##   variety = col_character(),
+##   colour = col_character()
+## )</code></pre>
+<pre class="r"><code>wine_colours &lt;- wine %&gt;% join_with_variety_colours(
+    rbind(variety_colours, blend_colours, manual_colours)
+) 
+
+plot_wine_colours(wine_colours)</code></pre>
+<p><img src="{{< blogdown/postref >}}index_files/figure-html/manual_colours-1.png" width="672" /></p>
+<p>And we’re there! As I said earlier, this is a somewhat aggressive
+classification. But we’ve got the most popular wines—the pinot noirs and the
+chardonnays—classified, and we can hope that any errors are only “kind of
+wrong” rather than “totally wrong”, and limited to the varieties that only
+appear once or twice.</p>
+</div>
+<div id="data-sources" class="section level2">
+<h2>Data sources</h2>
+<p>To avoid any potential licencing issues, I prefer not to post Kaggle data
+directly here. I encourage you to download the csv
+<a href="https://www.kaggle.com/zynicide/wine-reviews/">directly from Kaggle</a>. This will
+require a (free) Kaggle account. I’ve renamed the file here to <code>wine_reviews.csv</code>,
+but otherwise the data is unchanged before it is read. Other data used here:</p>
+<ul>
+<li>My manual classification of variety colours: <a href="/data/manually_classified.csv">manually_classified.csv</a></li>
+<li>The final outcome, giving just varieties and colours: <a href="/data/variety_colours.csv">variety_colours.csv</a></li>
+</ul>
+<p>The header image at the top of this page is in the
+<a href="https://www.pexels.com/photo/abundance-alcohol-berries-berry-357742/">public domain</a>.</p>
+<hr />
+<pre class="r"><code>devtools::session_info()</code></pre>
+<pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
+##  setting  value                       
+##  version  R version 4.1.0 (2021-05-18)
+##  os       macOS Big Sur 11.3          
+##  system   aarch64, darwin20           
+##  ui       X11                         
+##  language (EN)                        
+##  collate  en_AU.UTF-8                 
+##  ctype    en_AU.UTF-8                 
+##  tz       Australia/Melbourne         
+##  date     2021-05-30                  
+## 
+## ─ Packages ───────────────────────────────────────────────────────────────────
+##  package     * version date       lib source        
+##  assertthat    0.2.1   2019-03-21 [1] CRAN (R 4.1.0)
+##  backports     1.2.1   2020-12-09 [1] CRAN (R 4.1.0)
+##  blogdown      1.3     2021-04-14 [1] CRAN (R 4.1.0)
+##  bookdown      0.22    2021-04-22 [1] CRAN (R 4.1.0)
+##  broom         0.7.6   2021-04-05 [1] CRAN (R 4.1.0)
+##  cachem        1.0.4   2021-02-13 [1] CRAN (R 4.1.0)
+##  callr         3.7.0   2021-04-20 [1] CRAN (R 4.1.0)
+##  cellranger    1.1.0   2016-07-27 [1] CRAN (R 4.1.0)
+##  cli           2.5.0   2021-04-26 [1] CRAN (R 4.1.0)
+##  codetools     0.2-18  2020-11-04 [1] CRAN (R 4.1.0)
+##  colorspace    2.0-1   2021-05-04 [1] CRAN (R 4.1.0)
+##  crayon        1.4.1   2021-02-08 [1] CRAN (R 4.1.0)
+##  curl          4.3.1   2021-04-30 [1] CRAN (R 4.1.0)
+##  DBI           1.1.1   2021-01-15 [1] CRAN (R 4.1.0)
+##  dbplyr        2.1.1   2021-04-06 [1] CRAN (R 4.1.0)
+##  desc          1.3.0   2021-03-05 [1] CRAN (R 4.1.0)
+##  devtools      2.4.0   2021-04-07 [1] CRAN (R 4.1.0)
+##  digest        0.6.27  2020-10-24 [1] CRAN (R 4.1.0)
+##  dplyr       * 1.0.5   2021-03-05 [1] CRAN (R 4.1.0)
+##  ellipsis      0.3.2   2021-04-29 [1] CRAN (R 4.1.0)
+##  evaluate      0.14    2019-05-28 [1] CRAN (R 4.1.0)
+##  fansi         0.4.2   2021-01-15 [1] CRAN (R 4.1.0)
+##  farver        2.1.0   2021-02-28 [1] CRAN (R 4.1.0)
+##  fastmap       1.1.0   2021-01-25 [1] CRAN (R 4.1.0)
+##  forcats     * 0.5.1   2021-01-27 [1] CRAN (R 4.1.0)
+##  fs            1.5.0   2020-07-31 [1] CRAN (R 4.1.0)
+##  generics      0.1.0   2020-10-31 [1] CRAN (R 4.1.0)
+##  ggplot2     * 3.3.3   2020-12-30 [1] CRAN (R 4.1.0)
+##  glue          1.4.2   2020-08-27 [1] CRAN (R 4.1.0)
+##  gtable        0.3.0   2019-03-25 [1] CRAN (R 4.1.0)
+##  haven         2.4.1   2021-04-23 [1] CRAN (R 4.1.0)
+##  highr         0.9     2021-04-16 [1] CRAN (R 4.1.0)
+##  hms           1.0.0   2021-01-13 [1] CRAN (R 4.1.0)
+##  htmltools     0.5.1.1 2021-01-22 [1] CRAN (R 4.1.0)
+##  httr          1.4.2   2020-07-20 [1] CRAN (R 4.1.0)
+##  jsonlite      1.7.2   2020-12-09 [1] CRAN (R 4.1.0)
+##  knitr         1.33    2021-04-24 [1] CRAN (R 4.1.0)
+##  labeling      0.4.2   2020-10-20 [1] CRAN (R 4.1.0)
+##  lifecycle     1.0.0   2021-02-15 [1] CRAN (R 4.1.0)
+##  lubridate     1.7.10  2021-02-26 [1] CRAN (R 4.1.0)
+##  magrittr      2.0.1   2020-11-17 [1] CRAN (R 4.1.0)
+##  memoise       2.0.0   2021-01-26 [1] CRAN (R 4.1.0)
+##  modelr        0.1.8   2020-05-19 [1] CRAN (R 4.1.0)
+##  munsell       0.5.0   2018-06-12 [1] CRAN (R 4.1.0)
+##  pillar        1.6.0   2021-04-13 [1] CRAN (R 4.1.0)
+##  pkgbuild      1.2.0   2020-12-15 [1] CRAN (R 4.1.0)
+##  pkgconfig     2.0.3   2019-09-22 [1] CRAN (R 4.1.0)
+##  pkgload       1.2.1   2021-04-06 [1] CRAN (R 4.1.0)
+##  prettyunits   1.1.1   2020-01-24 [1] CRAN (R 4.1.0)
+##  processx      3.5.2   2021-04-30 [1] CRAN (R 4.1.0)
+##  ps            1.6.0   2021-02-28 [1] CRAN (R 4.1.0)
+##  purrr       * 0.3.4   2020-04-17 [1] CRAN (R 4.1.0)
+##  R6            2.5.0   2020-10-28 [1] CRAN (R 4.1.0)
+##  Rcpp          1.0.6   2021-01-15 [1] CRAN (R 4.1.0)
+##  readr       * 1.4.0   2020-10-05 [1] CRAN (R 4.1.0)
+##  readxl        1.3.1   2019-03-13 [1] CRAN (R 4.1.0)
+##  remotes       2.3.0   2021-04-01 [1] CRAN (R 4.1.0)
+##  reprex        2.0.0   2021-04-02 [1] CRAN (R 4.1.0)
+##  rlang         0.4.11  2021-04-30 [1] CRAN (R 4.1.0)
+##  rmarkdown     2.8     2021-05-07 [1] CRAN (R 4.1.0)
+##  rprojroot     2.0.2   2020-11-15 [1] CRAN (R 4.1.0)
+##  rstudioapi    0.13    2020-11-12 [1] CRAN (R 4.1.0)
+##  rvest       * 1.0.0   2021-03-09 [1] CRAN (R 4.1.0)
+##  scales        1.1.1   2020-05-11 [1] CRAN (R 4.1.0)
+##  selectr       0.4-2   2019-11-20 [1] CRAN (R 4.1.0)
+##  sessioninfo   1.1.1   2018-11-05 [1] CRAN (R 4.1.0)
+##  stringi       1.6.1   2021-05-10 [1] CRAN (R 4.1.0)
+##  stringr     * 1.4.0   2019-02-10 [1] CRAN (R 4.1.0)
+##  testthat      3.0.2   2021-02-14 [1] CRAN (R 4.1.0)
+##  tibble      * 3.1.1   2021-04-18 [1] CRAN (R 4.1.0)
+##  tidyr       * 1.1.3   2021-03-03 [1] CRAN (R 4.1.0)
+##  tidyselect    1.1.1   2021-04-30 [1] CRAN (R 4.1.0)
+##  tidyverse   * 1.3.1   2021-04-15 [1] CRAN (R 4.1.0)
+##  usethis       2.0.1   2021-02-10 [1] CRAN (R 4.1.0)
+##  utf8          1.2.1   2021-03-12 [1] CRAN (R 4.1.0)
+##  vctrs         0.3.8   2021-04-29 [1] CRAN (R 4.1.0)
+##  withr         2.4.2   2021-04-18 [1] CRAN (R 4.1.0)
+##  xfun          0.22    2021-03-11 [1] CRAN (R 4.1.0)
+##  xml2          1.3.2   2020-04-23 [1] CRAN (R 4.1.0)
+##  yaml          2.2.1   2020-02-01 [1] CRAN (R 4.1.0)
+## 
+## [1] /Library/Frameworks/R.framework/Versions/4.1-arm64/Resources/library</code></pre>
+</div>

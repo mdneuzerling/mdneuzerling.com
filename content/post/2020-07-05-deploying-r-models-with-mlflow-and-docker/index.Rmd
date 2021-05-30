@@ -8,7 +8,7 @@ tags:
 images: ["/img/containers.jpeg"]
 featuredalt: |
     Shipping containers
-output: hugodown::md_document
+
 ---
 
 [MLflow](https://mlflow.org/) is a platform for the "machine learning cycle". It's a suite of tools for managing models, with tracking of hyperparameters and metrics, a registry of models, and options for serving. It's this last bit that I'm going to focus on today.
@@ -273,7 +273,7 @@ fn <- carrier::crate(
 I have a method for taking a character vector of functions and including them in a crated function. I'm going to apply that method to a model package, in which all of my functions are in the package namespace:
 
 ```{r model-package-path, include = FALSE}
-model_package_path <- normalizePath("~/git/ReviewSentimentMLflow")
+model_package_path <- normalizePath("~/Dropbox/git/ReviewSentimentMLflow")
 devtools::load_all(model_package_path)
 plan <- training_plan()
 plan <- plan[plan$target != "save_model",] # don't need to export a model now

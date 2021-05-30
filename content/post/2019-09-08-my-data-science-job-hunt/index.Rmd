@@ -8,7 +8,7 @@ tags:
   - industry
 images: ["/img/job_outcomes.png"]
 featuredalt: "job_outcomes"
-output: hugodown::md_document
+
 ---
 
 If you listen to university advertisements for data science masters degrees, you'd believe that data scientists are so in-demand that they can walk into any company, state their salary, and start work straight away.

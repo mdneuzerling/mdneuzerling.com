@@ -1,0 +1,512 @@
+---
+title: Deploying R Models with MLflow and Docker
+author: ~
+date: '2020-07-05'
+slug: deploying-r-models-with-mlflow-and-docker
+tags:
+    - R
+images: ["/img/containers.jpeg"]
+featuredalt: |
+    Shipping containers
+
+---
+
+<script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
+
+
+<p><a href="https://mlflow.org/">MLflow</a> is a platform for the “machine learning cycle”. It’s a suite of tools for managing models, with tracking of hyperparameters and metrics, a registry of models, and options for serving. It’s this last bit that I’m going to focus on today.</p>
+<p>I haven’t been able to find much discussion or documentation about MLflow’s support for R. There’s the <a href="https://github.com/rstudio/mlflow-example">RStudio MLflow example</a>, but I wanted to see if I could use MLflow to serve something more complex. I’m going to use the <code>crate</code> MLflow flavour along with Docker to see if MLflow can be used to serve R models with preprocessing and prediction pipelines that are compositions of multiple functions, which is the standard for R.</p>
+<p>MLflow serves every model as an API, and it’s an approach that I like. I can imagine serving multiple models simultaneously and querying them with a common dataset to compare performance.</p>
+<p>I need to stress that MLflow isn’t just for serving models — one of its major appeals is the logging of hyperparameters and metrics in a model registry, along with a beautiful UI. I’m ignoring those components here, but that doesn’t mean they’re not important.</p>
+<div id="packaging-models-with-crate" class="section level2">
+<h2>Packaging models with <code>crate</code></h2>
+<p>MLflow serves models through “flavours”, which usually correspond to machine learning frameworks. In Python there are scikit-learn, TensorFlow, and PyTorch flavours, amongst others. In R there are just two: <code>keras</code> and <code>crate</code>. I’m not particularly interested in deep learning, so I’ll focus on <code>crate</code>.</p>
+<p><code>crate</code> is a function provided by <a href="https://github.com/r-lib/carrier">the <code>carrier</code> package</a>. It allows the packaging of R functions so that they can be sent off to a different R processes. It’s easy to see why this would be useful for serving machine learning models, since the goal is to package up a machine learning model and deploy it in some other environment.</p>
+<p>Let’s take a look at packaging up a simple linear regression with <code>crate</code>:</p>
+<pre class="r"><code>starwars_height_lm &lt;- lm(height ~ mass, data = dplyr::starwars)
+packaged_starwars_height_lm &lt;- carrier::crate(
+    function(x) stats::predict.lm(starwars_height_lm),
+    starwars_height_lm = starwars_height_lm
+)</code></pre>
+<p>A <code>crate</code> function call consists of a main function, which has to be “freshly” defined within the call, along with a list of objects that accompany the function. I can serialise this <code>packaged_starwars_height_lm</code> crate and move it to another R process, and the linear model I trained will move along with it. Serialising in MLflow is done with the S3 generic <code>mlflow::mlflow_save_model</code>.</p>
+<p>A couple of things to note here: I have to be very explicit about how I use functions in <code>crate</code>. Just typing <code>predict</code> wouldn’t do here: I have to use the specific <code>predict.lm</code> method for linear models. I also have to declare that it’s from the <code>stats</code> package. According to the help file, the accompanying objects will be automatically named after themselves if no name is provided, but I haven’t found this to be true.</p>
+</div>
+<div id="the-problem" class="section level2">
+<h2>The problem</h2>
+<p>There are no package dependencies in the above linear model (well, there’s <code>stats</code>, but that’s always going to be available) so it will work out of the box in any R process. For any “real life” model, there will be dependencies. In particular, <a href="/post/upgrade-your-workflow-with-drake/">I almost always work with a package workflow</a>. My modelling helper functions are contained within a package dedicated to that one model. Each of those functions is a dependency that has to be included in the crated function.</p>
+<p>I’ll use a simple example. The below won’t work, because I haven’t given <code>crate</code> the three accompanying functions it needs:</p>
+<pre class="r"><code>triple &lt;- function(x) 3*x
+square &lt;- function(x) x**2
+triplesquare &lt;- function(x) triple(square(x))
+fn &lt;- carrier::crate(function(x) triplesquare(x))
+fn(2)</code></pre>
+<pre><code>## Error in triplesquare(x): could not find function &quot;triplesquare&quot;</code></pre>
+<p>If I provide the three functions, everything works:</p>
+<pre class="r"><code>fn &lt;- carrier::crate(
+  function(x) triplesquare(x),
+  triplesquare = triplesquare,
+  square = square,
+  triple = triple)
+fn(2)</code></pre>
+<pre><code>## [1] 12</code></pre>
+<p>But then, if I delete the functions from the global environment, the crated function no longer works:</p>
+<pre class="r"><code>rm(triple, square, triplesquare)
+fn(2)</code></pre>
+<pre><code>## Error in triple(square(x)): could not find function &quot;triple&quot;</code></pre>
+<p>I need to be able to provide these functions to <code>crate</code> in a way that they can be carried along with the crated function somehow.</p>
+</div>
+<div id="option-1-install-the-package" class="section level2">
+<h2>Option 1: Install the package</h2>
+<p>If I’m using a package workflow, then the obvious solution is to install the package. I’ll be using <a href="/post/upgrade-your-workflow-with-drake/">my usual “ReviewSentiment” model</a> as an example, here as a package called <a href="https://github.com/mdneuzerling/ReviewSentimentMLflow">ReviewSentimentMLflow</a>. This package trains a random forest model that predicts the sentiment of brief product reviews. The random forest has three artefacts: a <code>review_rf</code> model object, along with <code>vectoriser</code> and <code>tfidf</code> objects for preprocessing. I can crate all of this up along with my <code>sentiment</code> predict function as below. Note the explicit mention of the <code>ReviewSentimentMLflow</code> namespace, which is required if I’m installing the package:</p>
+<pre class="r"><code>crated_model = carrier::crate(
+  function(review) { # Function must be &quot;fresh&quot;, ie. not pre-defined
+    ReviewSentimentMLflow::sentiment(review, review_rf, vectoriser, tfidf)
+  },
+  review_rf = review_rf,
+  vectoriser = vectoriser,
+  tfidf = tfidf
+)</code></pre>
+<p>The objects I specify — <code>review_rf</code>, <code>vectoriser</code> and <code>tfidf</code> — are not part of the package. They are model artefacts generated during training. <code>crate</code> can handle those as is.</p>
+<p>That <code>sentiment</code> function is where the problem lies. It’s one of the functions in my package. It uses the <code>vectoriser</code> and <code>tfidf</code> to process text into a format that can be handled by the random forest predictor. It calls on other package functions to do this, and it’s these underlying dependencies that will cause issues with <code>crate</code>.</p>
+<p>I can serialise <code>crated_model</code> with <code>mlflow_save_model</code>, and then everything can be exported to another platform. There are a few helper functions used in the definition of <code>sentiment</code>, but as long as that <code>ReviewSentimentMLflow</code> package is installed on that platform I can serve the model with MLflow using the terminal command <code>mlflow models serve</code>.</p>
+<p>But the packages I use for my models are highly specific to a certain dataset and use case; they certainly aren’t going on CRAN. The underlying motivation here is that I want to be able to execute my model on a machine that isn’t my computer, so that means I need to be able to move my package along with the <code>crated_model</code>.</p>
+<div id="accept-that-everything-will-be-put-in-a-container-eventually" class="section level3">
+<h3>Accept that everything will be put in a container eventually</h3>
+<p><a href="https://www.docker.com/">Docker</a> containers are the go-to solution for reproducibility. The idea is straightforward: put the crated model and all dependencies into a container, so that everything moves as one. There’s ample support for running containers, especially on the cloud, and containerisation is arguably the gold standard for reproducible workflows.</p>
+<p><a href="/post/user-getting-started-with-r-and-docker/">I first learned how to use R with Docker at useR 2018</a>, but getting everything incorporating everything into a Dockerfile was a real challenge. This is what worked in the end:</p>
+<pre><code>FROM rocker/r-ver:4.0.0
+ENV RENV_VERSION 0.10.0
+ENV CRAN_REPO https://packagemanager.rstudio.com/all/__linux__/focal/latest
+ENV MINICONDA_INSTALLER Miniconda3-py38_4.8.3-Linux-x86_64.sh
+ENV LISTENING_HOST 0.0.0.0
+ENV LISTENING_PORT 5000
+# Copy the entirety of the context into the image. This should be the R package source.
+ADD . / /model-package/
+WORKDIR /model-package
+
+# Install system dependencies. I couldn&#39;t get sysreqs to work here, since python-minimal
+# isn&#39;t available on this implementation of rocker. Curl is required to download Miniconda.
+RUN apt-get -y update &amp;&amp; \
+    apt-get install -y curl libgit2-dev libssl-dev zlib1g-dev \
+    pandoc pandoc-citeproc make libxml2-dev libgmp-dev libgfortran4 \
+    libcurl4-openssl-dev libssh2-1-dev libglpk-dev git-core
+
+# renv::restore can be a bit buggy if .Rprofile and the renv directory exist
+RUN rm -f .Rprofile
+RUN rm -rf renv
+RUN Rscript -e &quot;install.packages(&#39;remotes&#39;, repos = c(CRAN = Sys.getenv(&#39;CRAN_REPO&#39;)))&quot;
+RUN Rscript -e &quot;remotes::install_github(&#39;rstudio/renv&#39;, ref = Sys.getenv(&#39;RENV_VERSION&#39;))&quot;
+RUN Rscript -e &quot;renv::restore(repos = c(CRAN = Sys.getenv(&#39;CRAN_REPO&#39;)))&quot;
+
+# Install miniconda to /miniconda and install mlflow
+RUN curl -LO https://repo.anaconda.com/miniconda/$MINICONDA_INSTALLER
+RUN bash $MINICONDA_INSTALLER -p /miniconda -b
+RUN rm $MINICONDA_INSTALLER
+ENV PATH=/miniconda/bin:${PATH}
+RUN pip install mlflow
+ENV MLFLOW_BIN /miniconda/bin/mlflow
+ENV MLFLOW_PYTHON_BIN /miniconda/bin/python
+
+RUN Rscript -e &quot;if (!require(&#39;devtools&#39;)) install.packages(&#39;devtools&#39;, repos = Sys.getenv(&#39;CRAN_REPO&#39;))&quot;
+RUN Rscript -e &quot;devtools::install(dependencies = FALSE)&quot;
+
+ENTRYPOINT [&quot;/usr/bin/env&quot;]
+CMD mlflow models serve -m artefacts/model --host $LISTENING_HOST --port $LISTENING_PORT</code></pre>
+<p>The flow of this Dockerfile is:</p>
+<ol style="list-style-type: decimal">
+<li>Start with R (thanks to the <a href="https://www.rocker-project.org/">Rocker project</a>)</li>
+<li>Set some environment variables to guide reproducibility</li>
+<li>Copy the entire model package source code into the image (which contains the trained model artefacts, including the crated model)</li>
+<li>Install system dependencies with <code>apt-get</code></li>
+<li>Install R package dependencies with <code>renv</code></li>
+<li>Install <a href="https://docs.conda.io/en/latest/miniconda.html">Miniconda</a> (a minimal version of Anaconda)</li>
+<li>Install the Python MLflow module and configure its environment variables (required to run MLflow, even in R)</li>
+<li>Install the model package</li>
+<li>Serve the model with mlflow</li>
+</ol>
+<p>I’ve used <a href="https://rstudio.github.io/renv/">renv</a> to lock down the package versions. I’m also using the <a href="https://packagemanager.rstudio.com/client/#/">RStudio Package Manager</a> to download binaries instead of source code, which greatly reduces the package install time.</p>
+<p>To build the image, I navigate to the directory containing the package code and run the following in a terminal:</p>
+<pre class="bash"><code>Docker build --tag review-sentiment .</code></pre>
+<p>The build process will take some time, as it has to pull in all of the packages recorded in the <code>renv</code> lockfile. The resulting image is 2.5GB, which is disappointing given that the model artefacts (including the random forest) are altogether under a megabyte when compressed. A Docker guru could no doubt bring this size down, but there is a storage penalty for exporting an entire environment in which to run a model.</p>
+<p>To run the model, I enter the following command at a terminal:</p>
+<pre class="bash"><code>Docker run -p 5000:5000 review-sentiment</code></pre>
+<p>MLflow serves models as APIs, so I can query this model with <code>curl</code>:</p>
+<pre class="bash"><code>curl -X POST &quot;http://127.0.0.1:5000/predict/&quot; -H  &quot;accept: application/json&quot; -H  &quot;Content-Type: application/json&quot; -d &quot;\&quot;love\&quot;&quot;
+# &quot;good&quot;</code></pre>
+<p>This is a highly portable way of exporting a model. Actually, it doesn’t matter too much how the the model is served here — a model exposed with the <code>plumber</code> package would work just as well.</p>
+<p>I think this approach betrays the objective of MLflow. I already have an exported model object, and it’s reasonable to expect that the model object should work as is on any other machine. I can understand why I would use a container to provide a reproducible environment in which to serve that model, but it’s MLflow’s responsibility to do the actual serving.</p>
+<p>I think it would be better to separate responsibilities here: containers provide a reproducible environment for model serving, but MLflow does the serving independently of the container.</p>
+</div>
+</div>
+<div id="option-2-dont-install-the-package" class="section level2">
+<h2>Option 2: Don’t install the package</h2>
+<p>Consider the original problem of crating model objects along with the helper functions required to work with them. There’s another solution to this, and it’s suggested by examples in the <code>carrier</code> documentation: I can take my functions, rip them out of their package environment, and stick them into the <code>crate</code> environment.</p>
+<p>This is done through the <code>rlang::set_env</code> function, which returns a copy of the function in a new environment. If I don’t specify the environment, it defaults to the caller environment, which in the case below is that of <code>crate</code>:</p>
+<pre class="r"><code>triple &lt;- function(x) 3*x
+square &lt;- function(x) x**2
+triplesquare &lt;- function(x) triple(square(x))
+fn &lt;- carrier::crate(
+  function(x) triplesquare(x),
+  triplesquare = rlang::set_env(triplesquare),
+  square = rlang::set_env(square),
+  triple = rlang::set_env(triple)
+)
+rm(triple, square, triplesquare)
+fn(2)</code></pre>
+<pre><code>## [1] 12</code></pre>
+<div id="metaprogramming-is-magic" class="section level3">
+<h3>Metaprogramming is magic</h3>
+<p>I don’t want to manually type out every single function in my package. But because I’m using R I don’t have to. In R I can formulate the expressions I want to evaluate but do the evaluating later. This is called non-standard evaluation or <strong>metaprogramming</strong>. Let’s suppose I have a vector of names of functions I want to apply the <code>set_env</code> treatment to. So, for <code>c("triplesquare", "square", "triple")</code>:</p>
+<pre class="r"><code>library(rlang)
+triple &lt;- function(x) 3*x
+square &lt;- function(x) x**2
+triplesquare &lt;- function(x) triple(square(x))
+
+functions_to_crate &lt;- c(&quot;triplesquare&quot;, &quot;square&quot;, &quot;triple&quot;)
+functions_to_set_env &lt;- lapply(functions_to_crate, function (x) {
+  expr(set_env(!!sym(x)))
+})
+names(functions_to_set_env) &lt;- functions_to_crate
+
+fn &lt;- carrier::crate(
+  function(x) triplesquare(x),
+  !!!functions_to_set_env
+)
+rm(triple, square, triplesquare)
+fn(2)</code></pre>
+<pre><code>## [1] 12</code></pre>
+<p>Metaprogramming is one of the trickier parts of R. It’s not a standard feature of programming languages, so anyone who isn’t coming from a lisp background is likely to be confused. I’ll break down what’s happening here, but for a full introduction to metaprogramming there’s no better resource than <a href="https://adv-r.hadley.nz/metaprogramming.html">Advanced R</a>.</p>
+<p>I’m using the <code>rlang</code> package which provides a nicer metaprogramming interface with a few more features. The core idea here is that sometimes I want to save an expression to be evaluated for later (with <code>expr</code>), but sometimes I want to evaluate it right now (with <code>!!</code>) — a concept called <em>quasiquotation</em>. Consider the example below:</p>
+<pre><code>expr(set_env(!!sym(x)))</code></pre>
+<p>I’m giving R here an expression <code>set_env(!!sym(x))</code> but, because I’ve wrapped it in <code>expr</code>, I’m telling R not to evaluate it immediately. Except there is a part here that I do want to evaluate immediately: <code>x</code> is a character that I want to convert into a symbolic value. That is, I want to convert <code>"triple"</code> into <code>triple</code>. I can do this with the <code>sym</code> function and, by prefacing it with <code>!!</code>, I can tell R to ignore the <code>expr</code> and do this conversion <em>immediately</em>:</p>
+<pre class="r"><code>expr(set_env(!!sym(&quot;triple&quot;)))</code></pre>
+<pre><code>## set_env(triple)</code></pre>
+<p>I can see how this expression would be evaluated by directly inspecting the abstract syntax tree (AST) with <code>lobstr</code>. First, letting <code>x &lt;- "triple"</code> and without using <code>!!</code>:</p>
+<pre class="r"><code>lobstr::ast(expr(set_env(sym(&quot;triple&quot;))))</code></pre>
+<pre><code>## █─expr 
+## └─█─set_env 
+##   └─█─sym 
+##     └─&quot;triple&quot;</code></pre>
+<p>…and now with the <code>!!</code>:</p>
+<pre class="r"><code>x &lt;- &quot;triple&quot;
+lobstr::ast(expr(set_env(!!sym(&quot;triple&quot;))))</code></pre>
+<pre><code>## █─expr 
+## └─█─set_env 
+##   └─triple</code></pre>
+<p>The <code>!!</code> forces the evaluation of the AST at <code>sym("triple")</code>, without evaluating the rest of the expression. So the expression I have at the end is just <code>set_env(triple)</code>.</p>
+<p>I’ve now got an expression that I can evaluate when I want and in whatever environment I want. I’m generating code with code! And with <code>lapply</code> I can generate an expression like this for every function, and end up with a named list of expressions.</p>
+<p>I’ve saved these expressions so that I can evaluate them in the call to <code>crate</code>, which will copy every function into the <code>crate</code> environment. I do this with <code>!!!</code> (or “bang-bang-bang”). This forces the evaluation of every element in my list of expressions and uses them as arguments to the <code>crate</code> function:</p>
+<pre class="r"><code>fn &lt;- carrier::crate(
+  function(x) triplesquare(x),
+  !!!functions_to_set_env
+)</code></pre>
+</div>
+<div id="crate-everything" class="section level3">
+<h3>Crate everything</h3>
+<p>I have a method for taking a character vector of functions and including them in a crated function. I’m going to apply that method to a model package, in which all of my functions are in the package namespace:</p>
+<pre class="r"><code># Already defined and loaded: model_package_path
+loadd(review_rf, vectoriser, tfidf)
+package_name &lt;- pkgload::pkg_name(model_package_path)
+package_namespace_ls &lt;- ls(getNamespace(package_name))
+package_contents_to_set_env &lt;- lapply(package_namespace_ls, function (x) {
+  rlang::expr(rlang::set_env(!!rlang::sym(x)))
+})
+names(package_contents_to_set_env) &lt;- package_namespace_ls
+crated_model &lt;- carrier::crate(
+  function(review) {
+    sentiment(review, review_rf, vectoriser, tfidf)
+  },
+  review_rf = review_rf,
+  vectoriser = vectoriser,
+  tfidf = tfidf,
+  !!!package_contents_to_set_env
+)
+crated_model</code></pre>
+<pre><code>## Registered S3 method overwritten by &#39;pryr&#39;:
+##   method      from
+##   print.bytes Rcpp</code></pre>
+<pre><code>## &lt;crate&gt; 8.03 MB
+## * function: 18.1 kB
+## * `create_tfidf`: 8.02 MB
+## * `create_vocabulary`: 8.02 MB
+## * `download_and_read_data`: 8.02 MB
+## * `execution_plan`: 8.02 MB
+## * `generate_roc`: 8.02 MB
+## * `map_to_dtm`: 8.02 MB
+## * `new_data_to_be_scored`: 8.02 MB
+## * `read_review_file`: 8.02 MB
+## * `sentiment`: 8.02 MB
+## * `stem_tokeniser`: 8.02 MB
+## * `text_preprocessor`: 8.02 MB
+## * `training_plan`: 8.02 MB
+## * `review_rf`: 7.44 MB
+## * `tfidf`: 280 kB
+## * `vectoriser`: 85.8 kB
+## function(review) {
+##     sentiment(review, review_rf, vectoriser, tfidf)
+##   }</code></pre>
+<p>How cool is that? Everything in the model package is now also in the crated model, and it was all picked up automatically. There seems to be some issues with the print of this <code>packaged_model</code>, as those individual functions are not 8MB each. The actual <code>crate</code> is around 8MB, which compresses to under 1MB — roughly the same as the <code>crate</code> without the functions.</p>
+<p>I can now export this packaged model with <code>mlflow::mlflow_save_model(packaged_model, "artefacts/model")</code>. I’ll still use a Docker image for reproducibility, and the Dockerfile will look almost identical to the first one:</p>
+<pre><code>FROM rocker/r-ver:4.0.0
+ENV RENV_VERSION 0.10.0
+ENV CRAN_REPO https://packagemanager.rstudio.com/all/__linux__/focal/latest
+ENV MINICONDA_INSTALLER Miniconda3-py38_4.8.3-Linux-x86_64.sh
+# Copy the entirety of the context into the image. This should be the R package source.
+ADD renv.lock /
+
+# Install system dependencies. I couldn&#39;t get sysreqs to work here, since python-minimal
+# isn&#39;t available on this implementation of rocker. Curl is required to download Miniconda.
+RUN apt-get -y update &amp;&amp; \
+    apt-get install -y curl libgit2-dev libssl-dev zlib1g-dev \
+    pandoc pandoc-citeproc make libxml2-dev libgmp-dev libgfortran4 \
+    libcurl4-openssl-dev libssh2-1-dev libglpk-dev git-core
+
+RUN Rscript -e &quot;install.packages(&#39;remotes&#39;, repos = c(CRAN = Sys.getenv(&#39;CRAN_REPO&#39;)))&quot;
+RUN Rscript -e &quot;remotes::install_github(&#39;rstudio/renv&#39;, ref = Sys.getenv(&#39;RENV_VERSION&#39;))&quot;
+RUN Rscript -e &quot;renv::restore(repos = c(CRAN = Sys.getenv(&#39;CRAN_REPO&#39;)))&quot;
+
+# Install miniconda to /miniconda and install mlflow
+RUN curl -LO https://repo.anaconda.com/miniconda/$MINICONDA_INSTALLER
+RUN bash $MINICONDA_INSTALLER -p /miniconda -b
+RUN rm $MINICONDA_INSTALLER
+ENV PATH=/miniconda/bin:${PATH}
+RUN pip install mlflow
+ENV MLFLOW_BIN /miniconda/bin/mlflow
+ENV MLFLOW_PYTHON_BIN /miniconda/bin/python
+
+ENTRYPOINT [&quot;/usr/bin/env&quot;]</code></pre>
+<p>A couple of differences between this Dockerfile and the first one:</p>
+<ul>
+<li>I’m only copying one file from the model package — the <code>renv.lock</code> file. That is, the only information I’m baking into the image from the model package is the list of package dependencies.</li>
+<li>I’m no longer installing the model package into the image.</li>
+<li>I’m no longer running <code>mlflow models serve</code> within the image itself. The image is just an environment in which commands are run.</li>
+</ul>
+<p>This last point is a pretty big deal. I’ve changed my approach to reproducibility here by introducing a line between <em>environment</em> and <em>model</em>. I can change the model by running a new crated model. I can do this without having to rebuild the image, because the model is no longer baked into the image. I could even share a single image across multiple containers.</p>
+<p>There’s one snag here: <code>renv</code> dependencies. If I add another package as a dependency to the model, I’ll need to rebuild the image. It’s possible to use caching to speed things up, but I wonder if it’s possible to use the <a href="https://packagemanager.rstudio.com/client/#/">RStudio Package Manager</a> to pin our dependencies by <em>date</em>, and then have the image install new packages as needed? That way, as long as I use the same date-locked repository in both development and the Dockerfile, I won’t have to rebuild the image every time I introduce a new dependency. My Docker skills aren’t up to this task, but it doesn’t sound impossible.</p>
+<p>I’ll build the image as before, but give it a different tag:</p>
+<pre class="bash"><code>Docker build --tag review-sentiment-env-only .</code></pre>
+<p>My Docker image contains only the environment, so <code>docker run</code> is a little different. I mount the exported model as a volume within the container, and I give the <code>mlflow models serve</code> command when I <em>run</em> the image, not when I <em>build</em> it.</p>
+<pre class="bash"><code>docker run -p 5000:5000 -v $(pwd)/artefacts/model:/model review-sentiment-env-only mlflow models serve -m model --host 0.0.0.0 --port 5000</code></pre>
+</div>
+<div id="but-that-doesnt-work" class="section level3">
+<h3>But that doesn’t work</h3>
+<p>I really thought this would work, but when I try to query the API I get a dependency issue:</p>
+<pre class="bash"><code>curl -X POST &quot;http://127.0.0.1:5000/predict/&quot; -H  &quot;accept: application/json&quot; -H  &quot;Content-Type: application/json&quot; -d &quot;\&quot;love\&quot;&quot;
+# Invalid Request.  could not find function &quot;%&gt;%&quot;</code></pre>
+<p>Earlier I mentioned that <code>crate</code> expects specifically declared functions. I couldn’t use <code>predict.lm</code> for a linear model; I had to use <code>stats::predict.lm</code>. Well in my <code>ReviewSentimentMLflow</code> package I import <code>%&gt;%</code> from <code>dplyr</code>/<code>magrittr</code> and use it without the double colon reference. That’s why R can’t find <code>%&gt;%</code> here: it doesn’t know what namespace it’s in. Importing <code>dplyr</code> or <code>magrittr</code> won’t fix this issue either, since R won’t know to look in those namespaces.</p>
+<p>I don’t want to have to type <code>magrittr::`%&gt;%`</code> every time I want to pipe, so I’ll have to include this function in the call to <code>crate</code>. I won’t use <code>rlang::set_env</code> this time, because I want these functions to keep their namespaces. When I implemented <code>%&gt;%</code> I also noticed that the S3 method <code>randomForest:::predict.randomForest</code> was being called in the <code>sentiment</code> function. Both of these functions are included below:</p>
+<pre class="r"><code>crated_model &lt;- carrier::crate(
+  function(review) {
+    sentiment(review, review_rf, vectoriser, tfidf)
+  },
+  review_rf = review_rf,
+  vectoriser = vectoriser,
+  tfidf = tfidf,
+  !!!package_contents_to_set_env,
+  &quot;%&gt;%&quot; = magrittr::`%&gt;%`,
+  &quot;predict.randomForest&quot; = randomForest:::predict.randomForest
+)</code></pre>
+<p>It’s a lot of work, declaring all of these dependencies, but now my <code>MLflow</code> model is being successfully served:</p>
+<pre class="bash"><code>curl -X POST &quot;http://127.0.0.1:5000/predict/&quot; -H  &quot;accept: application/json&quot; -H  &quot;Content-Type: application/json&quot; -d &quot;\&quot;love\&quot;&quot;
+# &quot;good&quot;</code></pre>
+<p><code>crate</code> has all of the dependencies now, but declaring those dependencies looks very hacky. I’m not sure if I’d call this a solution.</p>
+</div>
+<div id="but-this-does-work" class="section level3">
+<h3>But this does work!</h3>
+<p>After I published this post, <a href="https://twitter.com/ndiquattro">Nick DiQuattro</a> came up with a great idea: stick the environment of the model package into the <code>crate</code> function. And it works!</p>
+<p>According to the documentation for <code>rlang::ns_env</code>, the package namespace is an environment where all of the functions of the package live. “The parent environments of namespaces are the <code>imports</code> environments, which contain all the functions imported from other packages”. So I’m going to take those imported functions and stick them into <code>crate</code>, without having to manually declare each one.</p>
+<p>The process is similar to defining <code>package_contents_to_set_env</code>:</p>
+<pre class="r"><code>import_env &lt;- ns_imports_env(package_name)
+imported_functions_names &lt;- ls(import_env)
+imported_functions_to_declare &lt;- lapply(
+  imported_functions_names,
+  function(x) expr(import_env[[!!x]])
+)
+names(imported_functions_to_declare) &lt;- imported_functions_names</code></pre>
+<p>Now my <code>crate</code> call looks like this:</p>
+<pre class="r"><code>crated_model &lt;- carrier::crate(
+  function(review) {
+    sentiment(review, review_rf, vectoriser, tfidf)
+  },
+  review_rf = review_rf,
+  vectoriser = vectoriser,
+  tfidf = tfidf,
+  !!!package_contents_to_set_env,
+  !!!imported_functions_to_declare
+)
+crated_model</code></pre>
+<pre><code>## &lt;crate&gt; 8.07 MB
+## * function: 12 kB
+## * `create_tfidf`: 8.06 MB
+## * `create_vocabulary`: 8.06 MB
+## * `download_and_read_data`: 8.06 MB
+## * `execution_plan`: 8.06 MB
+## * `generate_roc`: 8.06 MB
+## * `map_to_dtm`: 8.06 MB
+## * `new_data_to_be_scored`: 8.06 MB
+## * `read_review_file`: 8.06 MB
+## * `sentiment`: 8.06 MB
+## * `stem_tokeniser`: 8.06 MB
+## * `text_preprocessor`: 8.06 MB
+## * `training_plan`: 8.06 MB
+## * `review_rf`: 7.44 MB
+## * `tfidf`: 280 kB
+## * `vectoriser`: 85.8 kB
+## * `system.file`: 17.5 kB
+## * `trigger`: 14.5 kB
+## * `library.dynam.unload`: 8.31 kB
+## * `%&gt;%`: 3.73 kB
+## * `randomForest`: 1.14 kB
+## function(review) {
+##     sentiment(review, review_rf, vectoriser, tfidf)
+##   }</code></pre>
+<p>If I run my environment Docker image and serve this crated model, it works! It’s still a bit hacky, but not as bad as manually declaring every imported function. And, because <code>randomForest::randomForest</code> is an imported function in the NAMESPACE, that carries along the S3 method <code>predict.randomForest</code>. Which means that I can just use <code>predict</code> in my internal funtions, and R will be able to dispatch correctly.</p>
+<p>This only works because in a package workflow I declare my imported functions carefully with Roxygen tags. So the namespace contains lines like <code>importFrom(randomForest,randomForest)</code>. And if I’m not importing functions, I’m using them with double colons like <code>dplyr::mutate</code>. Because of this, <code>crate</code> knows where to find the functions I’m using.</p>
+<p>Thank you so much Nick!</p>
+</div>
+</div>
+<div id="mlflow-and-r" class="section level2">
+<h2>MLflow and R</h2>
+<p>Overall, I don’t feel confident using MLflow to deploy and serve an R model. The support through the <code>carrier</code> package is promising, but not yet mature enough to serve anything other than simple models with simple preprocessing. I’ve had to get around this by applying some metaprogramming hacks.</p>
+<p>I think the <code>carrier</code> package is a great approach to exporting an R model, and that the ability to export an arbitrary function would be more flexible than exporting an object in a given machine learning framework. But the package needs more power in terms of dependency detection.</p>
+<p>It’s reasonable to expect that R models will be developed in package workflows, so that users can take advantage of powerful packages like <code>devtools</code>, <code>testthat</code>, and <code>roxygen2</code>. Dependencies are clearly declared in package workflows, and <code>R CMD check</code> will yell at the user if a dependency isn’t listed. Given this, I think that <code>carrier</code> and MLflow can be advanced together by implementing automatic detection of dependencies within a package workflow.</p>
+<p>In particular, <code>carrier</code> could be improved by</p>
+<ol style="list-style-type: decimal">
+<li>supporting the importation of all functions within a given package into a <code>crate</code> call,</li>
+<li>supporting the importation of all declared imports within a NAMESPACE file (which would cover the above <code>%&gt;%</code> issue), and</li>
+<li>providing better support for S3 dispatch.</li>
+</ol>
+<p>I’d be cautious of doing this sort of global package import with arbitrary packages (it would fall apart as soon as it encounters compiled code), but I think it’s suitable for package workflows or “models as packages”. I’ve also heard of <a href="https://github.com/lbartnik/defer">a package called <code>defer</code></a> which may do some of the above, although I haven’t looked into it.</p>
+<p>I’ve outlined some approaches here for accommodating a package workflow with <code>carrier</code>, so there’s possibly some room here for me to contribute.</p>
+<hr />
+<pre class="r"><code>devtools::session_info()</code></pre>
+<pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
+##  setting  value                       
+##  version  R version 4.1.0 (2021-05-18)
+##  os       macOS Big Sur 11.3          
+##  system   aarch64, darwin20           
+##  ui       X11                         
+##  language (EN)                        
+##  collate  en_AU.UTF-8                 
+##  ctype    en_AU.UTF-8                 
+##  tz       Australia/Melbourne         
+##  date     2021-05-30                  
+## 
+## ─ Packages ───────────────────────────────────────────────────────────────────
+##  ! package               * version  date       lib source        
+##    askpass                 1.1      2019-01-13 [1] CRAN (R 4.1.0)
+##    assertthat              0.2.1    2019-03-21 [1] CRAN (R 4.1.0)
+##    backports               1.2.1    2020-12-09 [1] CRAN (R 4.1.0)
+##    base64enc               0.1-3    2015-07-28 [1] CRAN (R 4.1.0)
+##    base64url               1.4      2018-05-14 [1] CRAN (R 4.1.0)
+##    blogdown                1.3      2021-04-14 [1] CRAN (R 4.1.0)
+##    bookdown                0.22     2021-04-22 [1] CRAN (R 4.1.0)
+##    bslib                   0.2.5.1  2021-05-18 [1] CRAN (R 4.1.0)
+##    cachem                  1.0.4    2021-02-13 [1] CRAN (R 4.1.0)
+##    callr                   3.7.0    2021-04-20 [1] CRAN (R 4.1.0)
+##    carrier                 0.1.0    2018-10-16 [1] CRAN (R 4.1.0)
+##    cli                     2.5.0    2021-04-26 [1] CRAN (R 4.1.0)
+##    codetools               0.2-18   2020-11-04 [1] CRAN (R 4.1.0)
+##    colorspace              2.0-1    2021-05-04 [1] CRAN (R 4.1.0)
+##    crayon                  1.4.1    2021-02-08 [1] CRAN (R 4.1.0)
+##    curl                    4.3.1    2021-04-30 [1] CRAN (R 4.1.0)
+##    data.table              1.14.0   2021-02-21 [1] CRAN (R 4.1.0)
+##    DBI                     1.1.1    2021-01-15 [1] CRAN (R 4.1.0)
+##    desc                    1.3.0    2021-03-05 [1] CRAN (R 4.1.0)
+##    devtools                2.4.0    2021-04-07 [1] CRAN (R 4.1.0)
+##    digest                  0.6.27   2020-10-24 [1] CRAN (R 4.1.0)
+##    dplyr                   1.0.5    2021-03-05 [1] CRAN (R 4.1.0)
+##    drake                 * 7.13.2   2021-04-22 [1] CRAN (R 4.1.0)
+##    ellipsis                0.3.2    2021-04-29 [1] CRAN (R 4.1.0)
+##    evaluate                0.14     2019-05-28 [1] CRAN (R 4.1.0)
+##    fansi                   0.4.2    2021-01-15 [1] CRAN (R 4.1.0)
+##    fastmap                 1.1.0    2021-01-25 [1] CRAN (R 4.1.0)
+##    filelock                1.0.2    2018-10-05 [1] CRAN (R 4.1.0)
+##    float                   0.2-4    2020-04-22 [1] CRAN (R 4.1.0)
+##    forge                   0.2.0    2019-02-26 [1] CRAN (R 4.1.0)
+##    fs                      1.5.0    2020-07-31 [1] CRAN (R 4.1.0)
+##    generics                0.1.0    2020-10-31 [1] CRAN (R 4.1.0)
+##    ggplot2                 3.3.3    2020-12-30 [1] CRAN (R 4.1.0)
+##    glue                    1.4.2    2020-08-27 [1] CRAN (R 4.1.0)
+##    gtable                  0.3.0    2019-03-25 [1] CRAN (R 4.1.0)
+##    here                    1.0.1    2020-12-13 [1] CRAN (R 4.1.0)
+##    hms                     1.0.0    2021-01-13 [1] CRAN (R 4.1.0)
+##    htmltools               0.5.1.1  2021-01-22 [1] CRAN (R 4.1.0)
+##    httpuv                  1.6.1    2021-05-07 [1] CRAN (R 4.1.0)
+##    httr                    1.4.2    2020-07-20 [1] CRAN (R 4.1.0)
+##    igraph                  1.2.6    2020-10-06 [1] CRAN (R 4.1.0)
+##    ini                     0.3.1    2018-05-20 [1] CRAN (R 4.1.0)
+##    janeaustenr             0.1.5    2017-06-10 [1] CRAN (R 4.1.0)
+##    jquerylib               0.1.4    2021-04-26 [1] CRAN (R 4.1.0)
+##    jsonlite                1.7.2    2020-12-09 [1] CRAN (R 4.1.0)
+##    knitr                   1.33     2021-04-24 [1] CRAN (R 4.1.0)
+##    later                   1.2.0    2021-04-23 [1] CRAN (R 4.1.0)
+##    lattice                 0.20-44  2021-05-02 [1] CRAN (R 4.1.0)
+##    lgr                     0.4.2    2021-01-10 [1] CRAN (R 4.1.0)
+##    lifecycle               1.0.0    2021-02-15 [1] CRAN (R 4.1.0)
+##    lobstr                  1.1.1    2019-07-02 [1] CRAN (R 4.1.0)
+##    magrittr                2.0.1    2020-11-17 [1] CRAN (R 4.1.0)
+##    Matrix                  1.3-3    2021-05-04 [1] CRAN (R 4.1.0)
+##    memoise                 2.0.0    2021-01-26 [1] CRAN (R 4.1.0)
+##    mlapi                   0.1.0    2017-12-17 [1] CRAN (R 4.1.0)
+##    mlflow                  1.17.0   2021-05-08 [1] CRAN (R 4.1.0)
+##    munsell                 0.5.0    2018-06-12 [1] CRAN (R 4.1.0)
+##    NLP                     0.2-1    2020-10-14 [1] CRAN (R 4.1.0)
+##    openssl                 1.4.4    2021-04-30 [1] CRAN (R 4.1.0)
+##    pillar                  1.6.1    2021-05-16 [1] CRAN (R 4.1.0)
+##    pkgbuild                1.2.0    2020-12-15 [1] CRAN (R 4.1.0)
+##    pkgconfig               2.0.3    2019-09-22 [1] CRAN (R 4.1.0)
+##    pkgload                 1.2.1    2021-04-06 [1] CRAN (R 4.1.0)
+##    plotROC                 2.2.1    2018-06-23 [1] CRAN (R 4.1.0)
+##    png                     0.1-7    2013-12-03 [1] CRAN (R 4.1.0)
+##    prettyunits             1.1.1    2020-01-24 [1] CRAN (R 4.1.0)
+##    processx                3.5.2    2021-04-30 [1] CRAN (R 4.1.0)
+##    progress                1.2.2    2019-05-16 [1] CRAN (R 4.1.0)
+##    promises                1.2.0.1  2021-02-11 [1] CRAN (R 4.1.0)
+##    pryr                    0.1.4    2018-02-18 [1] CRAN (R 4.1.0)
+##    ps                      1.6.0    2021-02-28 [1] CRAN (R 4.1.0)
+##    purrr                   0.3.4    2020-04-17 [1] CRAN (R 4.1.0)
+##    R6                      2.5.0    2020-10-28 [1] CRAN (R 4.1.0)
+##    randomForest            4.6-14   2018-03-25 [1] CRAN (R 4.1.0)
+##    Rcpp                    1.0.6    2021-01-15 [1] CRAN (R 4.1.0)
+##    readr                   1.4.0    2020-10-05 [1] CRAN (R 4.1.0)
+##    remotes                 2.3.0    2021-04-01 [1] CRAN (R 4.1.0)
+##    reticulate              1.20     2021-05-03 [1] CRAN (R 4.1.0)
+##  R ReviewSentimentMLflow * 0.1.0    &lt;NA&gt;       [?] &lt;NA&gt;          
+##    RhpcBLASctl             0.20-137 2020-05-17 [1] CRAN (R 4.1.0)
+##    rlang                 * 0.4.11   2021-04-30 [1] CRAN (R 4.1.0)
+##    rmarkdown               2.8      2021-05-07 [1] CRAN (R 4.1.0)
+##    rprojroot               2.0.2    2020-11-15 [1] CRAN (R 4.1.0)
+##    rsparse                 0.4.0    2020-04-01 [1] CRAN (R 4.1.0)
+##    rstudioapi              0.13     2020-11-12 [1] CRAN (R 4.1.0)
+##    sass                    0.4.0    2021-05-12 [1] CRAN (R 4.1.0)
+##    scales                  1.1.1    2020-05-11 [1] CRAN (R 4.1.0)
+##    sessioninfo             1.1.1    2018-11-05 [1] CRAN (R 4.1.0)
+##    slam                    0.1-48   2020-12-03 [1] CRAN (R 4.1.0)
+##    SnowballC               0.7.0    2020-04-01 [1] CRAN (R 4.1.0)
+##    storr                   1.2.5    2020-12-01 [1] CRAN (R 4.1.0)
+##    stringi                 1.6.1    2021-05-10 [1] CRAN (R 4.1.0)
+##    stringr                 1.4.0    2019-02-10 [1] CRAN (R 4.1.0)
+##    swagger                 3.33.1   2020-10-02 [1] CRAN (R 4.1.0)
+##    testthat              * 3.0.2    2021-02-14 [1] CRAN (R 4.1.0)
+##    text2vec                0.6      2020-02-18 [1] CRAN (R 4.1.0)
+##    tibble                  3.1.2    2021-05-16 [1] CRAN (R 4.1.0)
+##    tidyselect              1.1.1    2021-04-30 [1] CRAN (R 4.1.0)
+##    tidytext                0.3.1    2021-04-10 [1] CRAN (R 4.1.0)
+##    tm                      0.7-8    2020-11-18 [1] CRAN (R 4.1.0)
+##    tokenizers              0.2.1    2018-03-29 [1] CRAN (R 4.1.0)
+##    txtq                    0.2.4    2021-03-27 [1] CRAN (R 4.1.0)
+##    usethis                 2.0.1    2021-02-10 [1] CRAN (R 4.1.0)
+##    utf8                    1.2.1    2021-03-12 [1] CRAN (R 4.1.0)
+##    vctrs                   0.3.8    2021-04-29 [1] CRAN (R 4.1.0)
+##    withr                   2.4.2    2021-04-18 [1] CRAN (R 4.1.0)
+##    xfun                    0.22     2021-03-11 [1] CRAN (R 4.1.0)
+##    xml2                    1.3.2    2020-04-23 [1] CRAN (R 4.1.0)
+##    yaml                    2.2.1    2020-02-01 [1] CRAN (R 4.1.0)
+##    zeallot                 0.1.0    2018-01-28 [1] CRAN (R 4.1.0)
+## 
+## [1] /Library/Frameworks/R.framework/Versions/4.1-arm64/Resources/library
+## 
+##  R ── Package was removed from disk.</code></pre>
+<p><a href="https://www.pexels.com/photo/blue-white-orange-and-brown-container-van-163726/">The image at the top of this page is in the public domain</a>.</p>
+</div>

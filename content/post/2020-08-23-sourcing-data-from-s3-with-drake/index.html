@@ -1,0 +1,297 @@
+---
+title: Sourcing Data from S3 with Drake
+author: ~
+date: '2020-08-23'
+slug: sourcing-data-from-s3-with-drake
+tags:
+    - R
+images: ["/img/drake-etag.png"]
+
+---
+
+<script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
+
+
+<p><a href="https://docs.ropensci.org/drake/"><code>drake</code> is a package for orchestrating R workflows</a>. Suppose I have some data in S3 that I want to pull into R through a <code>drake</code> plan. In this post I’ll use the S3 object’s <em>ETag</em> to make <code>drake</code> only re-download the data if it’s changed.</p>
+<p>This covers the scenario in which the object name in S3 stays the same. If I had, say, data being uploaded each day with an object name suffixed with the date, then I wouldn’t bother checking for any changes.</p>
+<div id="connecting-to-s3" class="section level2">
+<h2>Connecting to S3</h2>
+<p>Both <a href="https://github.com/cloudyr/aws.s3">the <code>aws.s3</code> package</a> and <a href="https://paws-r.github.io/">the <code>PAWS</code> package</a> will connect to S3 from R. I’ve used both of these packages, and there’s nothing wrong with them, but I always find myself going back to wrapping AWS CLI commands. I’m not saying this is the <em>best</em> way to use AWS from within R, but it works, although I haven’t tested this on anything other than Linux.</p>
+<p>By this point I’ve run <code>aws configure</code> in a terminal to make sure that I can actually connect to AWS. I’ve also created an S3 bucket.</p>
+<p>There are two ways to connect to S3 from the AWS CLI. <code>s3</code> commands are more high-level than <code>s3api</code> commands, but I’ll need to use both here.</p>
+</div>
+<div id="uploading-some-data" class="section level2">
+<h2>Uploading some data</h2>
+<p>I’ll start by uploading some CSV data to my bucket using an <code>s3</code> command, so that I have something to source in my <code>drake</code> plan. What I really like about the <code>s3</code> commands is that I don’t have to mess around with any multi-part uploads, as the AWS CLI takes care of all that complexity for me.</p>
+<p>I’ll create a function that forms and executes the command. My command needs to be of the form <code>aws s3 cp $SOURCE $TARGET</code>. The <code>$SOURCE</code> or <code>$TARGET</code> variables can be either local files or objects on S3, with objects prefixed with “s3://$BUCKET”. My function will take a data frame and, using the name of that data frame, determine the path of the object on S3. A more sophisticated function would be more flexible about how I’m storing the data, but this will do for my demonstration.</p>
+<p>Note the use of <code>shQuote</code> here, a base function that quotes a string to be passed to a shell.</p>
+<pre class="r"><code>upload_data_to_s3_bucket_as_csv &lt;- function(data, bucket) {
+  object_name &lt;- paste0(deparse(substitute(data)), &quot;.csv&quot;)
+  temp_file &lt;- tempfile()
+  # delete this temp file afterwards, even if this function errors
+  on.exit(unlink(temp_file)) 
+  readr::write_csv(data, temp_file)
+  quoted_file_path &lt;- shQuote(temp_file)
+  quoted_object_path &lt;- shQuote(glue::glue(&quot;s3://{bucket}/{object_name}&quot;))
+  system(glue::glue(&quot;aws s3 cp {quoted_file_path} {quoted_object_path}&quot;))
+}</code></pre>
+</div>
+<div id="getting-object-metadata" class="section level2">
+<h2>Getting object metadata</h2>
+<p>The ETag is a hash that changes when the object changes<a href="#fn1" class="footnote-ref" id="fnref1"><sup>1</sup></a>. It’s a short string like “de3b6f4731f18de03e51a5fea8102c93”. No matter how big an object is, the ETag stays the same size, and is quick to retrieve. This means that we can check the ETag every time a <code>drake</code> plan is made without spending too much time, and only re-download the actual data if <code>drake</code> detects a change in this value.</p>
+<p>I need to use a lower-level <code>s3api</code> command here. The <code>head-object</code> command retrieves object metadata. I convert that metadata from JSON, extract the ETag, and remove the stray quotation marks around it.</p>
+<pre class="r"><code>get_etag &lt;- function(object, bucket) {
+  response &lt;- system(
+    glue::glue(&quot;aws s3api head-object --bucket {bucket} --key {object}&quot;),
+    intern = TRUE
+  )
+  raw_etag &lt;- jsonlite::fromJSON(response)$ETag
+  gsub(&quot;\&quot;&quot;, &quot;&quot;, raw_etag)
+}</code></pre>
+</div>
+<div id="downloading-from-s3" class="section level2">
+<h2>Downloading from S3</h2>
+<p>I’ll once again use an <code>s3</code> command to download data from an S3. This function is very similar to the upload function, with the source and target reversed.</p>
+<pre class="r"><code>download_and_parse_csv_from_s3_bucket &lt;- function(object, bucket) {
+  temp_file &lt;- tempfile()
+  # delete this temp file afterwards, even if this function errors
+  on.exit(unlink(temp_file)) 
+  quoted_file_path &lt;- shQuote(temp_file)
+  quoted_object_path &lt;- shQuote(glue::glue(&quot;s3://{bucket}/{object}&quot;))
+  system(glue::glue(&quot;aws s3 cp {quoted_object_path} {quoted_file_path}&quot;))
+  readr::read_csv(temp_file)
+}</code></pre>
+</div>
+<div id="generating-some-random-data" class="section level2">
+<h2>Generating some random data</h2>
+<p>I’ll need some data to upload to my bucket and then retrieve. Here’s my go-to function for generating a data frame of random bits, adapated from <a href="https://stackoverflow.com/a/19352289/8456369">this StackOverflow answer</a>:</p>
+<pre class="r"><code>generate_random_data &lt;- function(nrow = 1000, ncol = 10) {
+  data.frame(replicate(ncol, sample(0:1, nrow, rep = TRUE)))
+}</code></pre>
+<p>Now I’ll upload some random data to my bucket. I’ve created a bucket “ocelittle”, which is the unofficial name of ocelot kittens. This has nothing to do with AWS; I just needed a unique name for the bucket.</p>
+<pre class="r"><code>some_random_data &lt;- generate_random_data()
+upload_data_to_s3_bucket_as_csv(some_random_data, bucket = &quot;ocelittle&quot;)
+get_etag(&quot;some_random_data.csv&quot;, bucket = &quot;ocelittle&quot;)</code></pre>
+<pre><code>## [1] &quot;0e867780f269c8dc34f0926ec63220b6&quot;</code></pre>
+</div>
+<div id="method-1-a-separate-target-for-the-etag" class="section level2">
+<h2>Method 1: A separate target for the ETag</h2>
+<p>There are two equally valid ways to structure the <code>drake</code> plan to check the ETag. They’re effectively equivalent, but there’s some slight variation in how the targets are displayed when I run <code>drake::vis_drake_graph</code>.</p>
+<p>In this first method, I’ll create a separate target for the ETag so that it appears in my <code>drake</code> plan visualisations, as in the plot at the top of this page. Pay close attention to the conditions for each trigger:</p>
+<pre class="r"><code>s3_plan &lt;- drake::drake_plan(
+  etag = target(
+    get_etag(&quot;some_random_data.csv&quot;, &quot;ocelittle&quot;),
+    trigger = trigger(condition = TRUE)
+  ),
+  data = target(
+    download_and_parse_csv_from_s3_bucket(&quot;some_random_data.csv&quot;, &quot;ocelittle&quot;),
+    trigger = trigger(change = etag)
+  )
+)</code></pre>
+<p>The condition for the <code>etag</code> target is <code>TRUE</code>, which means that this target will always run when I <code>make</code> the <code>drake</code> plan. The <code>data</code> target only runs when the value of the <code>etag</code> target has changed. When I <code>make</code> this plan for the first time, both targets are executed:</p>
+<pre class="r"><code>drake::make(s3_plan)</code></pre>
+<pre><code>## Warning: Do not run make() from a subdirectory of your project.
+##   running make() from: /Users/mdneuzerling/Dropbox/git/mdneuzerling.com/content/post/2020-08-23-sourcing-data-from-s3-with-drake
+##   drake project root:  /Users/mdneuzerling/Dropbox/git/mdneuzerling.com
+##   cache directory:     /Users/mdneuzerling/Dropbox/git/mdneuzerling.com/.drake</code></pre>
+<pre><code>## ▶ target etag</code></pre>
+<pre><code>## ▶ target data</code></pre>
+<pre><code>## 
+## ── Column specification ────────────────────────────────────────────────────────
+## cols(
+##   X1 = col_double(),
+##   X2 = col_double(),
+##   X3 = col_double(),
+##   X4 = col_double(),
+##   X5 = col_double(),
+##   X6 = col_double(),
+##   X7 = col_double(),
+##   X8 = col_double(),
+##   X9 = col_double(),
+##   X10 = col_double()
+## )</code></pre>
+<p>When I run the plan a second time, the <code>etag</code> target runs, as expected. But as the object’s ETag hasn’t changed, <code>drake</code> doesn’t execute the <code>data</code> target.</p>
+<pre class="r"><code>drake::make(s3_plan)</code></pre>
+<pre><code>## Warning: Do not run make() from a subdirectory of your project.
+##   running make() from: /Users/mdneuzerling/Dropbox/git/mdneuzerling.com/content/post/2020-08-23-sourcing-data-from-s3-with-drake
+##   drake project root:  /Users/mdneuzerling/Dropbox/git/mdneuzerling.com
+##   cache directory:     /Users/mdneuzerling/Dropbox/git/mdneuzerling.com/.drake</code></pre>
+<pre><code>## ▶ target etag</code></pre>
+<p>Now I’ll generate some new random data, and overwrite the previous CSV:</p>
+<pre class="r"><code>some_random_data &lt;- generate_random_data()
+upload_data_to_s3_bucket_as_csv(some_random_data, bucket = &quot;ocelittle&quot;)
+get_etag(&quot;some_random_data.csv&quot;, bucket = &quot;ocelittle&quot;)</code></pre>
+<pre><code>## [1] &quot;270a259368670f34806994caa3b4e5c5&quot;</code></pre>
+<p><code>drake</code> detects the change and re-downloads the data:</p>
+<pre class="r"><code>drake::make(s3_plan)</code></pre>
+<pre><code>## Warning: Do not run make() from a subdirectory of your project.
+##   running make() from: /Users/mdneuzerling/Dropbox/git/mdneuzerling.com/content/post/2020-08-23-sourcing-data-from-s3-with-drake
+##   drake project root:  /Users/mdneuzerling/Dropbox/git/mdneuzerling.com
+##   cache directory:     /Users/mdneuzerling/Dropbox/git/mdneuzerling.com/.drake</code></pre>
+<pre><code>## ▶ target etag</code></pre>
+<pre><code>## ▶ target data</code></pre>
+<pre><code>## 
+## ── Column specification ────────────────────────────────────────────────────────
+## cols(
+##   X1 = col_double(),
+##   X2 = col_double(),
+##   X3 = col_double(),
+##   X4 = col_double(),
+##   X5 = col_double(),
+##   X6 = col_double(),
+##   X7 = col_double(),
+##   X8 = col_double(),
+##   X9 = col_double(),
+##   X10 = col_double()
+## )</code></pre>
+</div>
+<div id="method-2-embedding-the-etag-in-the-data-target" class="section level2">
+<h2>Method 2: Embedding the ETag in the data target</h2>
+<p>Rather than having a separate target for the <code>etag</code>, I can use put the <code>get_etag</code> function directly into the <code>change</code> condition for the data download target. This won’t show the ETag when I run <code>drake::drake_vis_graph</code>.</p>
+<p>First, I’ll clean the <code>drake</code> cache:</p>
+<pre class="r"><code>drake::clean()</code></pre>
+<p>The <code>change</code> trigger accepts any R expression, so it accepts the <code>get_etag</code> function. This will run every time the plan is made.</p>
+<pre class="r"><code>s3_plan_2 &lt;- drake::drake_plan(
+  data = target(
+    download_and_parse_csv_from_s3_bucket(&quot;some_random_data.csv&quot;, &quot;ocelittle&quot;),
+    trigger = trigger(change = get_etag(&quot;some_random_data.csv&quot;, &quot;ocelittle&quot;))
+  )
+)</code></pre>
+<pre class="r"><code>drake::make(s3_plan_2)</code></pre>
+<pre><code>## Warning: Do not run make() from a subdirectory of your project.
+##   running make() from: /Users/mdneuzerling/Dropbox/git/mdneuzerling.com/content/post/2020-08-23-sourcing-data-from-s3-with-drake
+##   drake project root:  /Users/mdneuzerling/Dropbox/git/mdneuzerling.com
+##   cache directory:     /Users/mdneuzerling/Dropbox/git/mdneuzerling.com/.drake</code></pre>
+<pre><code>## ▶ target data</code></pre>
+<pre><code>## 
+## ── Column specification ────────────────────────────────────────────────────────
+## cols(
+##   X1 = col_double(),
+##   X2 = col_double(),
+##   X3 = col_double(),
+##   X4 = col_double(),
+##   X5 = col_double(),
+##   X6 = col_double(),
+##   X7 = col_double(),
+##   X8 = col_double(),
+##   X9 = col_double(),
+##   X10 = col_double()
+## )</code></pre>
+<pre class="r"><code>drake::make(s3_plan_2)</code></pre>
+<pre><code>## Warning: Do not run make() from a subdirectory of your project.
+##   running make() from: /Users/mdneuzerling/Dropbox/git/mdneuzerling.com/content/post/2020-08-23-sourcing-data-from-s3-with-drake
+##   drake project root:  /Users/mdneuzerling/Dropbox/git/mdneuzerling.com
+##   cache directory:     /Users/mdneuzerling/Dropbox/git/mdneuzerling.com/.drake</code></pre>
+<pre><code>## ✓ All targets are already up to date.</code></pre>
+<p>And now, just to check, I’ll upload some new data and make sure that <code>drake</code> downloads it:</p>
+<pre class="r"><code>some_random_data &lt;- generate_random_data()
+upload_data_to_s3_bucket_as_csv(some_random_data, bucket = &quot;ocelittle&quot;)
+get_etag(&quot;some_random_data.csv&quot;, bucket = &quot;ocelittle&quot;)</code></pre>
+<pre><code>## [1] &quot;5023a64c464cffdc7ae8b6b51aa78dc6&quot;</code></pre>
+<pre class="r"><code>drake::make(s3_plan_2)</code></pre>
+<pre><code>## Warning: Do not run make() from a subdirectory of your project.
+##   running make() from: /Users/mdneuzerling/Dropbox/git/mdneuzerling.com/content/post/2020-08-23-sourcing-data-from-s3-with-drake
+##   drake project root:  /Users/mdneuzerling/Dropbox/git/mdneuzerling.com
+##   cache directory:     /Users/mdneuzerling/Dropbox/git/mdneuzerling.com/.drake</code></pre>
+<pre><code>## ▶ target data</code></pre>
+<pre><code>## 
+## ── Column specification ────────────────────────────────────────────────────────
+## cols(
+##   X1 = col_double(),
+##   X2 = col_double(),
+##   X3 = col_double(),
+##   X4 = col_double(),
+##   X5 = col_double(),
+##   X6 = col_double(),
+##   X7 = col_double(),
+##   X8 = col_double(),
+##   X9 = col_double(),
+##   X10 = col_double()
+## )</code></pre>
+<p>Once again, <code>drake</code> detects the change and re-downloads the data.</p>
+<hr />
+<pre class="r"><code>devtools::session_info()</code></pre>
+<pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
+##  setting  value                       
+##  version  R version 4.1.0 (2021-05-18)
+##  os       macOS Big Sur 11.3          
+##  system   aarch64, darwin20           
+##  ui       X11                         
+##  language (EN)                        
+##  collate  en_AU.UTF-8                 
+##  ctype    en_AU.UTF-8                 
+##  tz       Australia/Melbourne         
+##  date     2021-05-30                  
+## 
+## ─ Packages ───────────────────────────────────────────────────────────────────
+##  package     * version date       lib source        
+##  backports     1.2.1   2020-12-09 [1] CRAN (R 4.1.0)
+##  base64url     1.4     2018-05-14 [1] CRAN (R 4.1.0)
+##  blogdown      1.3     2021-04-14 [1] CRAN (R 4.1.0)
+##  bookdown      0.22    2021-04-22 [1] CRAN (R 4.1.0)
+##  bslib         0.2.5.1 2021-05-18 [1] CRAN (R 4.1.0)
+##  cachem        1.0.4   2021-02-13 [1] CRAN (R 4.1.0)
+##  callr         3.7.0   2021-04-20 [1] CRAN (R 4.1.0)
+##  cli           2.5.0   2021-04-26 [1] CRAN (R 4.1.0)
+##  crayon        1.4.1   2021-02-08 [1] CRAN (R 4.1.0)
+##  desc          1.3.0   2021-03-05 [1] CRAN (R 4.1.0)
+##  devtools      2.4.0   2021-04-07 [1] CRAN (R 4.1.0)
+##  digest        0.6.27  2020-10-24 [1] CRAN (R 4.1.0)
+##  drake       * 7.13.2  2021-04-22 [1] CRAN (R 4.1.0)
+##  ellipsis      0.3.2   2021-04-29 [1] CRAN (R 4.1.0)
+##  evaluate      0.14    2019-05-28 [1] CRAN (R 4.1.0)
+##  fansi         0.4.2   2021-01-15 [1] CRAN (R 4.1.0)
+##  fastmap       1.1.0   2021-01-25 [1] CRAN (R 4.1.0)
+##  filelock      1.0.2   2018-10-05 [1] CRAN (R 4.1.0)
+##  fs            1.5.0   2020-07-31 [1] CRAN (R 4.1.0)
+##  glue          1.4.2   2020-08-27 [1] CRAN (R 4.1.0)
+##  here          1.0.1   2020-12-13 [1] CRAN (R 4.1.0)
+##  hms           1.0.0   2021-01-13 [1] CRAN (R 4.1.0)
+##  htmltools     0.5.1.1 2021-01-22 [1] CRAN (R 4.1.0)
+##  igraph        1.2.6   2020-10-06 [1] CRAN (R 4.1.0)
+##  jquerylib     0.1.4   2021-04-26 [1] CRAN (R 4.1.0)
+##  jsonlite      1.7.2   2020-12-09 [1] CRAN (R 4.1.0)
+##  knitr         1.33    2021-04-24 [1] CRAN (R 4.1.0)
+##  lifecycle     1.0.0   2021-02-15 [1] CRAN (R 4.1.0)
+##  magrittr      2.0.1   2020-11-17 [1] CRAN (R 4.1.0)
+##  memoise       2.0.0   2021-01-26 [1] CRAN (R 4.1.0)
+##  pillar        1.6.1   2021-05-16 [1] CRAN (R 4.1.0)
+##  pkgbuild      1.2.0   2020-12-15 [1] CRAN (R 4.1.0)
+##  pkgconfig     2.0.3   2019-09-22 [1] CRAN (R 4.1.0)
+##  pkgload       1.2.1   2021-04-06 [1] CRAN (R 4.1.0)
+##  prettyunits   1.1.1   2020-01-24 [1] CRAN (R 4.1.0)
+##  processx      3.5.2   2021-04-30 [1] CRAN (R 4.1.0)
+##  progress      1.2.2   2019-05-16 [1] CRAN (R 4.1.0)
+##  ps            1.6.0   2021-02-28 [1] CRAN (R 4.1.0)
+##  purrr         0.3.4   2020-04-17 [1] CRAN (R 4.1.0)
+##  R6            2.5.0   2020-10-28 [1] CRAN (R 4.1.0)
+##  readr         1.4.0   2020-10-05 [1] CRAN (R 4.1.0)
+##  remotes       2.3.0   2021-04-01 [1] CRAN (R 4.1.0)
+##  rlang         0.4.11  2021-04-30 [1] CRAN (R 4.1.0)
+##  rmarkdown     2.8     2021-05-07 [1] CRAN (R 4.1.0)
+##  rprojroot     2.0.2   2020-11-15 [1] CRAN (R 4.1.0)
+##  rstudioapi    0.13    2020-11-12 [1] CRAN (R 4.1.0)
+##  sass          0.4.0   2021-05-12 [1] CRAN (R 4.1.0)
+##  sessioninfo   1.1.1   2018-11-05 [1] CRAN (R 4.1.0)
+##  storr         1.2.5   2020-12-01 [1] CRAN (R 4.1.0)
+##  stringi       1.6.1   2021-05-10 [1] CRAN (R 4.1.0)
+##  stringr       1.4.0   2019-02-10 [1] CRAN (R 4.1.0)
+##  testthat      3.0.2   2021-02-14 [1] CRAN (R 4.1.0)
+##  tibble        3.1.2   2021-05-16 [1] CRAN (R 4.1.0)
+##  tidyselect    1.1.1   2021-04-30 [1] CRAN (R 4.1.0)
+##  txtq          0.2.4   2021-03-27 [1] CRAN (R 4.1.0)
+##  usethis       2.0.1   2021-02-10 [1] CRAN (R 4.1.0)
+##  utf8          1.2.1   2021-03-12 [1] CRAN (R 4.1.0)
+##  vctrs         0.3.8   2021-04-29 [1] CRAN (R 4.1.0)
+##  withr         2.4.2   2021-04-18 [1] CRAN (R 4.1.0)
+##  xfun          0.22    2021-03-11 [1] CRAN (R 4.1.0)
+##  yaml          2.2.1   2020-02-01 [1] CRAN (R 4.1.0)
+## 
+## [1] /Library/Frameworks/R.framework/Versions/4.1-arm64/Resources/library</code></pre>
+</div>
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn1"><p><a href="https://docs.aws.amazon.com/AmazonS3/latest/API/RESTCommonResponseHeaders.html">The ETag may or may not be an MD5 hash of the obejct data</a>.<a href="#fnref1" class="footnote-back">↩︎</a></p></li>
+</ol>
+</div>

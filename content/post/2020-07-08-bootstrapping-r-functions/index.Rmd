@@ -8,7 +8,7 @@ tags:
 images: ["/img/crime-scene.jpeg"]
 featuredalt: |
     Tape that reads "Crime Scene".
-output: hugodown::md_document
+
 ---
 
 Suppose I want a function that runs some setup code before it runs the first time. Maybe I'm using dplyr but I haven't properly declared all of my dplyr calls in my function, so I want to run `library(dplyr)` before the actual function is run. Or maybe I want to install a package if it isn't already installed, or restore a `renv` file, or any other setup process. I only want this special code to run the first time my function is called. After that, the function that runs should be exactly as I declared it, with none of the setup code.

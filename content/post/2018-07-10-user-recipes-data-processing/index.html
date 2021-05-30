@@ -1,0 +1,473 @@
+---
+title: 'useR: Recipes for data processing'
+author: ''
+date: '2018-07-10'
+# weight: 1
+slug: user-recipes-for-data-processing
+categories: []
+tags: [R, conference]
+images: ["/img/useR/tutorial_two.png"]
+featuredalt: "useR2018 Tutorial Two"
+
+---
+
+<script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
+
+
+<p>These are my notes for the tutorial given by
+<a href="https://twitter.com/topepos">Max Kuhn</a> on the afternoon of the first day of the
+UseR 2018 conference.</p>
+<p>Full confession here: I was having trouble deciding between this tutorial
+and another one, and eventually decided on the other one. But then I
+accidentally came to the wrong room and I took it as a sign that it was time
+to learn more about preprocessing.</p>
+<p>Also, the <code>recipes</code> package is <em>adorable</em>.</p>
+<p>{{% tweet "1016541132057075712" %}}</p>
+<p>I’m going to follow along with
+<a href="https://github.com/topepo/user2018">Max’s slides</a>, making some comments along
+the way.</p>
+<p>Required packages:</p>
+<pre class="r"><code>install.packages(c(&quot;AmesHousing&quot;, &quot;broom&quot;, &quot;kknn&quot;, &quot;recipes&quot;, &quot;rsample&quot;,
+                   &quot;tidyverse&quot;, &quot;yardstick&quot;, &quot;caret&quot;))</code></pre>
+<p>The data set we’ll use is the AMES IA housing data. This includes sale
+price (our target) along with 81 predictors, such as location, house
+components (eg. swimming pool), number of bedrooms, and so on. The raw data can
+be found at <a href="https://ww2.amstat.org/publications/jse/v19n3/decock/AmesHousing.txt">https://ww2.amstat.org/publications/jse/v19n3/decock/AmesHousing.txt</a>
+but we will be using the processed version found in the <code>AmesHousing</code> package.</p>
+<div id="reasons-for-modifying-the-data" class="section level2">
+<h2>Reasons for modifying the data</h2>
+<p>Sometimes you need to <em>do stuff</em> to your data before you can use it.
+Moreover, you’re often dealing with data that’s split into train/test sets. In
+this case you need to work out what to do with your data based solely on the
+training set and then apply that—without changing your method—to the test
+set. If you’re dealing with <span class="math inline">\(K\)</span>-fold cross-validation, then you’ve got <span class="math inline">\(K\)</span>
+training sets and <span class="math inline">\(K\)</span> test sets, and so you need to repeat this <span class="math inline">\(K\)</span> times.</p>
+<p>A good example is missing value imputation, where you have some missing data in
+your train/test sets and you need to fill them in via some imputation method.
+I’m no expert on the topic (but I hope to be after the missing value imputation
+tutorial tomorrow!) but I’ve seen this done wrong before in StackExchange
+answers and in Kaggle solutions: the imputation is done <em>before</em> the data is
+split into train/test. This is called <em>data leakage</em>, and models assessed using
+the test set will appear more accurate than they are, because they’ve already
+had a sneak preview of the data.</p>
+<p>So the mindset is clear: don’t touch the test set until the last possible
+moment. The <code>recipes</code> package follows this mindset. First you create a
+<code>recipe</code>, which is a blueprint for how you will process your data. At this
+point, no data has been modified. Then you <code>prep</code> the recipe using your
+training set, which is where the actual processing is defined and all the
+parameters worked out. Finally, you can <code>bake</code> the training set, test set, or
+any other data set with similar columns, and in this step the actual
+modification takes place.</p>
+<p>Missing value <strong>imputation</strong> isn’t the only reason to process data, though.
+Processing can involve:</p>
+<ul>
+<li><strong>Centering</strong> and <strong>scaling</strong> the predictors. Some models (K-NN, SBMs, PLS,
+neural networks) require that the predictor variables have the same units.</li>
+<li>Applying <strong>filters</strong> or <strong>PCA signal extraction</strong> to deal with correlation
+between predictors.</li>
+<li><strong>Encoding data</strong>, such as turning factors into Boolean dummy variables, or
+turning dates into days of the week.</li>
+<li>Developing new features (ie. <strong>feature engineering</strong>).</li>
+</ul>
+</div>
+<div id="the-ames-data" class="section level2">
+<h2>The <code>ames</code> data</h2>
+<p>We load the data with the <code>make_ames</code> function from the <code>AmesHousing</code> package.</p>
+<pre class="r"><code>ames &lt;- AmesHousing::make_ames()
+ames %&gt;% str</code></pre>
+<pre><code>## tibble [2,930 × 81] (S3: tbl_df/tbl/data.frame)
+##  $ MS_SubClass       : Factor w/ 16 levels &quot;One_Story_1946_and_Newer_All_Styles&quot;,..: 1 1 1 1 6 6 12 12 12 6 ...
+##  $ MS_Zoning         : Factor w/ 7 levels &quot;Floating_Village_Residential&quot;,..: 3 2 3 3 3 3 3 3 3 3 ...
+##  $ Lot_Frontage      : num [1:2930] 141 80 81 93 74 78 41 43 39 60 ...
+##  $ Lot_Area          : int [1:2930] 31770 11622 14267 11160 13830 9978 4920 5005 5389 7500 ...
+##  $ Street            : Factor w/ 2 levels &quot;Grvl&quot;,&quot;Pave&quot;: 2 2 2 2 2 2 2 2 2 2 ...
+##  $ Alley             : Factor w/ 3 levels &quot;Gravel&quot;,&quot;No_Alley_Access&quot;,..: 2 2 2 2 2 2 2 2 2 2 ...
+##  $ Lot_Shape         : Factor w/ 4 levels &quot;Regular&quot;,&quot;Slightly_Irregular&quot;,..: 2 1 2 1 2 2 1 2 2 1 ...
+##  $ Land_Contour      : Factor w/ 4 levels &quot;Bnk&quot;,&quot;HLS&quot;,&quot;Low&quot;,..: 4 4 4 4 4 4 4 2 4 4 ...
+##  $ Utilities         : Factor w/ 3 levels &quot;AllPub&quot;,&quot;NoSeWa&quot;,..: 1 1 1 1 1 1 1 1 1 1 ...
+##  $ Lot_Config        : Factor w/ 5 levels &quot;Corner&quot;,&quot;CulDSac&quot;,..: 1 5 1 1 5 5 5 5 5 5 ...
+##  $ Land_Slope        : Factor w/ 3 levels &quot;Gtl&quot;,&quot;Mod&quot;,&quot;Sev&quot;: 1 1 1 1 1 1 1 1 1 1 ...
+##  $ Neighborhood      : Factor w/ 29 levels &quot;North_Ames&quot;,&quot;College_Creek&quot;,..: 1 1 1 1 7 7 17 17 17 7 ...
+##  $ Condition_1       : Factor w/ 9 levels &quot;Artery&quot;,&quot;Feedr&quot;,..: 3 2 3 3 3 3 3 3 3 3 ...
+##  $ Condition_2       : Factor w/ 8 levels &quot;Artery&quot;,&quot;Feedr&quot;,..: 3 3 3 3 3 3 3 3 3 3 ...
+##  $ Bldg_Type         : Factor w/ 5 levels &quot;OneFam&quot;,&quot;TwoFmCon&quot;,..: 1 1 1 1 1 1 5 5 5 1 ...
+##  $ House_Style       : Factor w/ 8 levels &quot;One_and_Half_Fin&quot;,..: 3 3 3 3 8 8 3 3 3 8 ...
+##  $ Overall_Qual      : Factor w/ 10 levels &quot;Very_Poor&quot;,&quot;Poor&quot;,..: 6 5 6 7 5 6 8 8 8 7 ...
+##  $ Overall_Cond      : Factor w/ 10 levels &quot;Very_Poor&quot;,&quot;Poor&quot;,..: 5 6 6 5 5 6 5 5 5 5 ...
+##  $ Year_Built        : int [1:2930] 1960 1961 1958 1968 1997 1998 2001 1992 1995 1999 ...
+##  $ Year_Remod_Add    : int [1:2930] 1960 1961 1958 1968 1998 1998 2001 1992 1996 1999 ...
+##  $ Roof_Style        : Factor w/ 6 levels &quot;Flat&quot;,&quot;Gable&quot;,..: 4 2 4 4 2 2 2 2 2 2 ...
+##  $ Roof_Matl         : Factor w/ 8 levels &quot;ClyTile&quot;,&quot;CompShg&quot;,..: 2 2 2 2 2 2 2 2 2 2 ...
+##  $ Exterior_1st      : Factor w/ 16 levels &quot;AsbShng&quot;,&quot;AsphShn&quot;,..: 4 14 15 4 14 14 6 7 6 14 ...
+##  $ Exterior_2nd      : Factor w/ 17 levels &quot;AsbShng&quot;,&quot;AsphShn&quot;,..: 11 15 16 4 15 15 6 7 6 15 ...
+##  $ Mas_Vnr_Type      : Factor w/ 5 levels &quot;BrkCmn&quot;,&quot;BrkFace&quot;,..: 5 4 2 4 4 2 4 4 4 4 ...
+##  $ Mas_Vnr_Area      : num [1:2930] 112 0 108 0 0 20 0 0 0 0 ...
+##  $ Exter_Qual        : Factor w/ 4 levels &quot;Excellent&quot;,&quot;Fair&quot;,..: 4 4 4 3 4 4 3 3 3 4 ...
+##  $ Exter_Cond        : Factor w/ 5 levels &quot;Excellent&quot;,&quot;Fair&quot;,..: 5 5 5 5 5 5 5 5 5 5 ...
+##  $ Foundation        : Factor w/ 6 levels &quot;BrkTil&quot;,&quot;CBlock&quot;,..: 2 2 2 2 3 3 3 3 3 3 ...
+##  $ Bsmt_Qual         : Factor w/ 6 levels &quot;Excellent&quot;,&quot;Fair&quot;,..: 6 6 6 6 3 6 3 3 3 6 ...
+##  $ Bsmt_Cond         : Factor w/ 6 levels &quot;Excellent&quot;,&quot;Fair&quot;,..: 3 6 6 6 6 6 6 6 6 6 ...
+##  $ Bsmt_Exposure     : Factor w/ 5 levels &quot;Av&quot;,&quot;Gd&quot;,&quot;Mn&quot;,..: 2 4 4 4 4 4 3 4 4 4 ...
+##  $ BsmtFin_Type_1    : Factor w/ 7 levels &quot;ALQ&quot;,&quot;BLQ&quot;,&quot;GLQ&quot;,..: 2 6 1 1 3 3 3 1 3 7 ...
+##  $ BsmtFin_SF_1      : num [1:2930] 2 6 1 1 3 3 3 1 3 7 ...
+##  $ BsmtFin_Type_2    : Factor w/ 7 levels &quot;ALQ&quot;,&quot;BLQ&quot;,&quot;GLQ&quot;,..: 7 4 7 7 7 7 7 7 7 7 ...
+##  $ BsmtFin_SF_2      : num [1:2930] 0 144 0 0 0 0 0 0 0 0 ...
+##  $ Bsmt_Unf_SF       : num [1:2930] 441 270 406 1045 137 ...
+##  $ Total_Bsmt_SF     : num [1:2930] 1080 882 1329 2110 928 ...
+##  $ Heating           : Factor w/ 6 levels &quot;Floor&quot;,&quot;GasA&quot;,..: 2 2 2 2 2 2 2 2 2 2 ...
+##  $ Heating_QC        : Factor w/ 5 levels &quot;Excellent&quot;,&quot;Fair&quot;,..: 2 5 5 1 3 1 1 1 1 3 ...
+##  $ Central_Air       : Factor w/ 2 levels &quot;N&quot;,&quot;Y&quot;: 2 2 2 2 2 2 2 2 2 2 ...
+##  $ Electrical        : Factor w/ 6 levels &quot;FuseA&quot;,&quot;FuseF&quot;,..: 5 5 5 5 5 5 5 5 5 5 ...
+##  $ First_Flr_SF      : int [1:2930] 1656 896 1329 2110 928 926 1338 1280 1616 1028 ...
+##  $ Second_Flr_SF     : int [1:2930] 0 0 0 0 701 678 0 0 0 776 ...
+##  $ Low_Qual_Fin_SF   : int [1:2930] 0 0 0 0 0 0 0 0 0 0 ...
+##  $ Gr_Liv_Area       : int [1:2930] 1656 896 1329 2110 1629 1604 1338 1280 1616 1804 ...
+##  $ Bsmt_Full_Bath    : num [1:2930] 1 0 0 1 0 0 1 0 1 0 ...
+##  $ Bsmt_Half_Bath    : num [1:2930] 0 0 0 0 0 0 0 0 0 0 ...
+##  $ Full_Bath         : int [1:2930] 1 1 1 2 2 2 2 2 2 2 ...
+##  $ Half_Bath         : int [1:2930] 0 0 1 1 1 1 0 0 0 1 ...
+##  $ Bedroom_AbvGr     : int [1:2930] 3 2 3 3 3 3 2 2 2 3 ...
+##  $ Kitchen_AbvGr     : int [1:2930] 1 1 1 1 1 1 1 1 1 1 ...
+##  $ Kitchen_Qual      : Factor w/ 5 levels &quot;Excellent&quot;,&quot;Fair&quot;,..: 5 5 3 1 5 3 3 3 3 3 ...
+##  $ TotRms_AbvGrd     : int [1:2930] 7 5 6 8 6 7 6 5 5 7 ...
+##  $ Functional        : Factor w/ 8 levels &quot;Maj1&quot;,&quot;Maj2&quot;,..: 8 8 8 8 8 8 8 8 8 8 ...
+##  $ Fireplaces        : int [1:2930] 2 0 0 2 1 1 0 0 1 1 ...
+##  $ Fireplace_Qu      : Factor w/ 6 levels &quot;Excellent&quot;,&quot;Fair&quot;,..: 3 4 4 6 6 3 4 4 6 6 ...
+##  $ Garage_Type       : Factor w/ 7 levels &quot;Attchd&quot;,&quot;Basment&quot;,..: 1 1 1 1 1 1 1 1 1 1 ...
+##  $ Garage_Finish     : Factor w/ 4 levels &quot;Fin&quot;,&quot;No_Garage&quot;,..: 1 4 4 1 1 1 1 3 3 1 ...
+##  $ Garage_Cars       : num [1:2930] 2 1 1 2 2 2 2 2 2 2 ...
+##  $ Garage_Area       : num [1:2930] 528 730 312 522 482 470 582 506 608 442 ...
+##  $ Garage_Qual       : Factor w/ 6 levels &quot;Excellent&quot;,&quot;Fair&quot;,..: 6 6 6 6 6 6 6 6 6 6 ...
+##  $ Garage_Cond       : Factor w/ 6 levels &quot;Excellent&quot;,&quot;Fair&quot;,..: 6 6 6 6 6 6 6 6 6 6 ...
+##  $ Paved_Drive       : Factor w/ 3 levels &quot;Dirt_Gravel&quot;,..: 2 3 3 3 3 3 3 3 3 3 ...
+##  $ Wood_Deck_SF      : int [1:2930] 210 140 393 0 212 360 0 0 237 140 ...
+##  $ Open_Porch_SF     : int [1:2930] 62 0 36 0 34 36 0 82 152 60 ...
+##  $ Enclosed_Porch    : int [1:2930] 0 0 0 0 0 0 170 0 0 0 ...
+##  $ Three_season_porch: int [1:2930] 0 0 0 0 0 0 0 0 0 0 ...
+##  $ Screen_Porch      : int [1:2930] 0 120 0 0 0 0 0 144 0 0 ...
+##  $ Pool_Area         : int [1:2930] 0 0 0 0 0 0 0 0 0 0 ...
+##  $ Pool_QC           : Factor w/ 5 levels &quot;Excellent&quot;,&quot;Fair&quot;,..: 4 4 4 4 4 4 4 4 4 4 ...
+##  $ Fence             : Factor w/ 5 levels &quot;Good_Privacy&quot;,..: 5 3 5 5 3 5 5 5 5 5 ...
+##  $ Misc_Feature      : Factor w/ 6 levels &quot;Elev&quot;,&quot;Gar2&quot;,..: 3 3 2 3 3 3 3 3 3 3 ...
+##  $ Misc_Val          : int [1:2930] 0 0 12500 0 0 0 0 0 0 0 ...
+##  $ Mo_Sold           : int [1:2930] 5 6 6 4 3 6 4 1 3 6 ...
+##  $ Year_Sold         : int [1:2930] 2010 2010 2010 2010 2010 2010 2010 2010 2010 2010 ...
+##  $ Sale_Type         : Factor w/ 10 levels &quot;COD&quot;,&quot;Con&quot;,&quot;ConLD&quot;,..: 10 10 10 10 10 10 10 10 10 10 ...
+##  $ Sale_Condition    : Factor w/ 6 levels &quot;Abnorml&quot;,&quot;AdjLand&quot;,..: 5 5 5 5 5 5 5 5 5 5 ...
+##  $ Sale_Price        : int [1:2930] 215000 105000 172000 244000 189900 195500 213500 191500 236500 189000 ...
+##  $ Longitude         : num [1:2930] -93.6 -93.6 -93.6 -93.6 -93.6 ...
+##  $ Latitude          : num [1:2930] 42.1 42.1 42.1 42.1 42.1 ...
+##  - attr(*, &quot;spec&quot;)=
+##   .. cols(
+##   ..   Order = col_integer(),
+##   ..   PID = col_character(),
+##   ..   `MS SubClass` = col_character(),
+##   ..   `MS Zoning` = col_character(),
+##   ..   `Lot Frontage` = col_integer(),
+##   ..   `Lot Area` = col_integer(),
+##   ..   Street = col_character(),
+##   ..   Alley = col_character(),
+##   ..   `Lot Shape` = col_character(),
+##   ..   `Land Contour` = col_character(),
+##   ..   Utilities = col_character(),
+##   ..   `Lot Config` = col_character(),
+##   ..   `Land Slope` = col_character(),
+##   ..   Neighborhood = col_character(),
+##   ..   `Condition 1` = col_character(),
+##   ..   `Condition 2` = col_character(),
+##   ..   `Bldg Type` = col_character(),
+##   ..   `House Style` = col_character(),
+##   ..   `Overall Qual` = col_integer(),
+##   ..   `Overall Cond` = col_integer(),
+##   ..   `Year Built` = col_integer(),
+##   ..   `Year Remod/Add` = col_integer(),
+##   ..   `Roof Style` = col_character(),
+##   ..   `Roof Matl` = col_character(),
+##   ..   `Exterior 1st` = col_character(),
+##   ..   `Exterior 2nd` = col_character(),
+##   ..   `Mas Vnr Type` = col_character(),
+##   ..   `Mas Vnr Area` = col_integer(),
+##   ..   `Exter Qual` = col_character(),
+##   ..   `Exter Cond` = col_character(),
+##   ..   Foundation = col_character(),
+##   ..   `Bsmt Qual` = col_character(),
+##   ..   `Bsmt Cond` = col_character(),
+##   ..   `Bsmt Exposure` = col_character(),
+##   ..   `BsmtFin Type 1` = col_character(),
+##   ..   `BsmtFin SF 1` = col_integer(),
+##   ..   `BsmtFin Type 2` = col_character(),
+##   ..   `BsmtFin SF 2` = col_integer(),
+##   ..   `Bsmt Unf SF` = col_integer(),
+##   ..   `Total Bsmt SF` = col_integer(),
+##   ..   Heating = col_character(),
+##   ..   `Heating QC` = col_character(),
+##   ..   `Central Air` = col_character(),
+##   ..   Electrical = col_character(),
+##   ..   `1st Flr SF` = col_integer(),
+##   ..   `2nd Flr SF` = col_integer(),
+##   ..   `Low Qual Fin SF` = col_integer(),
+##   ..   `Gr Liv Area` = col_integer(),
+##   ..   `Bsmt Full Bath` = col_integer(),
+##   ..   `Bsmt Half Bath` = col_integer(),
+##   ..   `Full Bath` = col_integer(),
+##   ..   `Half Bath` = col_integer(),
+##   ..   `Bedroom AbvGr` = col_integer(),
+##   ..   `Kitchen AbvGr` = col_integer(),
+##   ..   `Kitchen Qual` = col_character(),
+##   ..   `TotRms AbvGrd` = col_integer(),
+##   ..   Functional = col_character(),
+##   ..   Fireplaces = col_integer(),
+##   ..   `Fireplace Qu` = col_character(),
+##   ..   `Garage Type` = col_character(),
+##   ..   `Garage Yr Blt` = col_integer(),
+##   ..   `Garage Finish` = col_character(),
+##   ..   `Garage Cars` = col_integer(),
+##   ..   `Garage Area` = col_integer(),
+##   ..   `Garage Qual` = col_character(),
+##   ..   `Garage Cond` = col_character(),
+##   ..   `Paved Drive` = col_character(),
+##   ..   `Wood Deck SF` = col_integer(),
+##   ..   `Open Porch SF` = col_integer(),
+##   ..   `Enclosed Porch` = col_integer(),
+##   ..   `3Ssn Porch` = col_integer(),
+##   ..   `Screen Porch` = col_integer(),
+##   ..   `Pool Area` = col_integer(),
+##   ..   `Pool QC` = col_character(),
+##   ..   Fence = col_character(),
+##   ..   `Misc Feature` = col_character(),
+##   ..   `Misc Val` = col_integer(),
+##   ..   `Mo Sold` = col_integer(),
+##   ..   `Yr Sold` = col_integer(),
+##   ..   `Sale Type` = col_character(),
+##   ..   `Sale Condition` = col_character(),
+##   ..   SalePrice = col_integer()
+##   .. )</code></pre>
+<p>Now we will split the data into test and train. We’ll reserve 25% of of the
+data for testing.</p>
+<pre class="r"><code>library(rsample)
+set.seed(4595)
+data_split &lt;- initial_split(ames, strata = &quot;Sale_Price&quot;, prop = 0.75)
+ames_train &lt;- training(data_split)
+ames_test &lt;- testing(data_split)</code></pre>
+</div>
+<div id="a-simple-log-transform" class="section level2">
+<h2>A simple log-transform</h2>
+<p>The first of Max’s examples is a really simple log transform of <code>Sale_Price</code>.
+Suppose we use the formula <code>log10(Sale_Price) ~ Longitude + Latitude</code>.
+The steps are:</p>
+<ol style="list-style-type: decimal">
+<li>Assign <code>Sale_Price</code> to the outcome.</li>
+<li>Assign <code>Longitude</code> and <code>Latittude</code> as predictors.</li>
+<li>Log transform the outcome.</li>
+</ol>
+<p>The way to define this in <code>recipes</code> is as follows:</p>
+<pre class="r"><code>mod_rec &lt;- recipe(Sale_Price ~ Longitude + Latitude, data = ames_train) %&gt;% 
+    step_log(Sale_Price, base = 10)</code></pre>
+</div>
+<div id="infrequently-occurring-levels" class="section level2">
+<h2>Infrequently occurring levels</h2>
+<p>We usually encode factors as Boolean dummy variables, with R often taking care
+of this in the background. If there are <code>C</code> levels of the factor, only <code>C - 1</code>
+dummy variables are required. But what if you have very few values for a
+particular level? For example, the <code>Neighborhood</code> predictor in our <code>ames</code> data:</p>
+<pre class="r"><code>ames %&gt;% 
+    ggplot(aes(x = Neighborhood)) +
+    geom_bar(fill = &quot;#6d1e3b&quot;, colour = &quot;white&quot;) + # I don&#39;t like the default grey
+    coord_flip()</code></pre>
+<p><img src="{{< blogdown/postref >}}index_files/figure-html/ames_locations-1.png" width="672" /></p>
+<p>In fact, there’s only one data point with a <code>Neighborhood</code> of Landmark. This is
+called a “zero-variance predictor”. There are two main approaches here:</p>
+<ol style="list-style-type: decimal">
+<li>remove any data points with infrequently occurring values, or</li>
+<li>group all of the infrequently occurring values into an “Other” level.</li>
+</ol>
+<p>This is a job for the <code>recipes</code> package, and Max takes us through the example.</p>
+<p>We can take care of the infrequently occurring levels here using the
+<code>step_other</code> function. In this case, we “other” any level that occurs fewer
+than 5% of the time. We can then create dummy variables for all factor
+variables with <code>step_dummy</code>:</p>
+<pre class="r"><code>mod_rec &lt;- recipe(Sale_Price ~ Longitude + Latitude + Neighborhood, 
+                  data = ames_train) %&gt;% 
+    step_log(Sale_Price, base = 10) %&gt;% # The log-transform from earlier
+    step_other(Neighborhood, threshold = 0.05) %&gt;%
+    step_dummy(all_nominal())</code></pre>
+</div>
+<div id="the-recipes-process" class="section level2">
+<h2>The <code>recipes</code> process</h2>
+<p>Recipes work in a three-step process: <code>recipe</code> –&gt; <code>prepare</code> –&gt; <code>bake</code>/<code>juice</code>.
+We can think of this as: define –&gt; estimate –&gt; apply. <code>juice</code> only applies to
+the original data set defined in the recipe, the idea at the core of <code>bake</code> is
+that it can be applied to an <em>arbitrary</em> data set.</p>
+<p>First we <code>prep</code> the data using the recipe in Max’s example:</p>
+<pre class="r"><code>mod_rec_trained &lt;- mod_rec %&gt;% 
+    prep(training = ames_train, retain = TRUE)
+mod_rec_trained</code></pre>
+<pre><code>## Data Recipe
+## 
+## Inputs:
+## 
+##       role #variables
+##    outcome          1
+##  predictor          3
+## 
+## Training data contained 2197 data points and no missing data.
+## 
+## Operations:
+## 
+## Log transformation on Sale_Price [trained]
+## Collapsing factor levels for Neighborhood [trained]
+## Dummy variables from Neighborhood [trained]</code></pre>
+<p>We can now <code>bake</code> the recipe, applying it to the test set we defined earlier:</p>
+<pre class="r"><code>ames_test_dummies &lt;- mod_rec_trained %&gt;% bake(new_data = ames_test)
+names(ames_test_dummies)</code></pre>
+<pre><code>##  [1] &quot;Longitude&quot;                       &quot;Latitude&quot;                       
+##  [3] &quot;Sale_Price&quot;                      &quot;Neighborhood_College_Creek&quot;     
+##  [5] &quot;Neighborhood_Old_Town&quot;           &quot;Neighborhood_Edwards&quot;           
+##  [7] &quot;Neighborhood_Somerset&quot;           &quot;Neighborhood_Northridge_Heights&quot;
+##  [9] &quot;Neighborhood_Gilbert&quot;            &quot;Neighborhood_Sawyer&quot;            
+## [11] &quot;Neighborhood_other&quot;</code></pre>
+</div>
+<div id="other-uses" class="section level2">
+<h2>Other uses</h2>
+<p>I have to admit that the rest got away from me a little bit, because I’m not
+overly familiar with all of the transformations/methods that were used (what
+is a Yeo-Johnson Power Transformation?!).</p>
+<p>However, there’s a tonne of cool stuff in the slides that I’ll be coming back
+to later, I’m sure. Max used <code>recipes</code> and <code>rsample</code> to:</p>
+<ul>
+<li>deal with interactions between predictors,</li>
+<li>apply processing to all of the folds of a 10-fold cross-validation,</li>
+<li>train 10 linear models on that same 10-fold cross-validation,</li>
+<li>assess and plot the performance of those linear models, and</li>
+<li>train and asses 10 nearest-neighbour models on the 10-fold cross-validation.</li>
+</ul>
+<p>I know I’ll be using this <code>recipes</code> package <em>a lot</em>.</p>
+<hr />
+<pre class="r"><code>devtools::session_info()</code></pre>
+<pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
+##  setting  value                       
+##  version  R version 4.1.0 (2021-05-18)
+##  os       macOS Big Sur 11.3          
+##  system   aarch64, darwin20           
+##  ui       X11                         
+##  language (EN)                        
+##  collate  en_AU.UTF-8                 
+##  ctype    en_AU.UTF-8                 
+##  tz       Australia/Melbourne         
+##  date     2021-05-30                  
+## 
+## ─ Packages ───────────────────────────────────────────────────────────────────
+##  package      * version    date       lib source        
+##  AmesHousing    0.0.4      2020-06-23 [1] CRAN (R 4.1.0)
+##  assertthat     0.2.1      2019-03-21 [1] CRAN (R 4.1.0)
+##  backports      1.2.1      2020-12-09 [1] CRAN (R 4.1.0)
+##  blogdown       1.3        2021-04-14 [1] CRAN (R 4.1.0)
+##  bookdown       0.22       2021-04-22 [1] CRAN (R 4.1.0)
+##  broom          0.7.6      2021-04-05 [1] CRAN (R 4.1.0)
+##  bslib          0.2.5.1    2021-05-18 [1] CRAN (R 4.1.0)
+##  cachem         1.0.4      2021-02-13 [1] CRAN (R 4.1.0)
+##  callr          3.7.0      2021-04-20 [1] CRAN (R 4.1.0)
+##  caret        * 6.0-88     2021-05-15 [1] CRAN (R 4.1.0)
+##  cellranger     1.1.0      2016-07-27 [1] CRAN (R 4.1.0)
+##  class          7.3-19     2021-05-03 [1] CRAN (R 4.1.0)
+##  cli            2.5.0      2021-04-26 [1] CRAN (R 4.1.0)
+##  codetools      0.2-18     2020-11-04 [1] CRAN (R 4.1.0)
+##  colorspace     2.0-1      2021-05-04 [1] CRAN (R 4.1.0)
+##  crayon         1.4.1      2021-02-08 [1] CRAN (R 4.1.0)
+##  data.table     1.14.0     2021-02-21 [1] CRAN (R 4.1.0)
+##  DBI            1.1.1      2021-01-15 [1] CRAN (R 4.1.0)
+##  dbplyr         2.1.1      2021-04-06 [1] CRAN (R 4.1.0)
+##  desc           1.3.0      2021-03-05 [1] CRAN (R 4.1.0)
+##  devtools       2.4.0      2021-04-07 [1] CRAN (R 4.1.0)
+##  digest         0.6.27     2020-10-24 [1] CRAN (R 4.1.0)
+##  dplyr        * 1.0.5      2021-03-05 [1] CRAN (R 4.1.0)
+##  ellipsis       0.3.2      2021-04-29 [1] CRAN (R 4.1.0)
+##  evaluate       0.14       2019-05-28 [1] CRAN (R 4.1.0)
+##  fansi          0.4.2      2021-01-15 [1] CRAN (R 4.1.0)
+##  farver         2.1.0      2021-02-28 [1] CRAN (R 4.1.0)
+##  fastmap        1.1.0      2021-01-25 [1] CRAN (R 4.1.0)
+##  forcats      * 0.5.1      2021-01-27 [1] CRAN (R 4.1.0)
+##  foreach        1.5.1      2020-10-15 [1] CRAN (R 4.1.0)
+##  fs             1.5.0      2020-07-31 [1] CRAN (R 4.1.0)
+##  furrr          0.2.2      2021-01-29 [1] CRAN (R 4.1.0)
+##  future         1.21.0     2020-12-10 [1] CRAN (R 4.1.0)
+##  generics       0.1.0      2020-10-31 [1] CRAN (R 4.1.0)
+##  ggplot2      * 3.3.3      2020-12-30 [1] CRAN (R 4.1.0)
+##  globals        0.14.0     2020-11-22 [1] CRAN (R 4.1.0)
+##  glue           1.4.2      2020-08-27 [1] CRAN (R 4.1.0)
+##  gower          0.2.2      2020-06-23 [1] CRAN (R 4.1.0)
+##  gtable         0.3.0      2019-03-25 [1] CRAN (R 4.1.0)
+##  haven          2.4.1      2021-04-23 [1] CRAN (R 4.1.0)
+##  highr          0.9        2021-04-16 [1] CRAN (R 4.1.0)
+##  hms            1.0.0      2021-01-13 [1] CRAN (R 4.1.0)
+##  htmltools      0.5.1.1    2021-01-22 [1] CRAN (R 4.1.0)
+##  httr           1.4.2      2020-07-20 [1] CRAN (R 4.1.0)
+##  ipred          0.9-11     2021-03-12 [1] CRAN (R 4.1.0)
+##  iterators      1.0.13     2020-10-15 [1] CRAN (R 4.1.0)
+##  jquerylib      0.1.4      2021-04-26 [1] CRAN (R 4.1.0)
+##  jsonlite       1.7.2      2020-12-09 [1] CRAN (R 4.1.0)
+##  knitr          1.33       2021-04-24 [1] CRAN (R 4.1.0)
+##  labeling       0.4.2      2020-10-20 [1] CRAN (R 4.1.0)
+##  lattice      * 0.20-44    2021-05-02 [1] CRAN (R 4.1.0)
+##  lava           1.6.9      2021-03-11 [1] CRAN (R 4.1.0)
+##  lifecycle      1.0.0      2021-02-15 [1] CRAN (R 4.1.0)
+##  listenv        0.8.0      2019-12-05 [1] CRAN (R 4.1.0)
+##  lubridate      1.7.10     2021-02-26 [1] CRAN (R 4.1.0)
+##  magrittr       2.0.1      2020-11-17 [1] CRAN (R 4.1.0)
+##  MASS           7.3-54     2021-05-03 [1] CRAN (R 4.1.0)
+##  Matrix         1.3-3      2021-05-04 [1] CRAN (R 4.1.0)
+##  memoise        2.0.0      2021-01-26 [1] CRAN (R 4.1.0)
+##  ModelMetrics   1.2.2.2    2020-03-17 [1] CRAN (R 4.1.0)
+##  modelr         0.1.8      2020-05-19 [1] CRAN (R 4.1.0)
+##  munsell        0.5.0      2018-06-12 [1] CRAN (R 4.1.0)
+##  nlme           3.1-152    2021-02-04 [1] CRAN (R 4.1.0)
+##  nnet           7.3-16     2021-05-03 [1] CRAN (R 4.1.0)
+##  parallelly     1.25.0     2021-04-30 [1] CRAN (R 4.1.0)
+##  pillar         1.6.1      2021-05-16 [1] CRAN (R 4.1.0)
+##  pkgbuild       1.2.0      2020-12-15 [1] CRAN (R 4.1.0)
+##  pkgconfig      2.0.3      2019-09-22 [1] CRAN (R 4.1.0)
+##  pkgload        1.2.1      2021-04-06 [1] CRAN (R 4.1.0)
+##  plyr           1.8.6      2020-03-03 [1] CRAN (R 4.1.0)
+##  prettyunits    1.1.1      2020-01-24 [1] CRAN (R 4.1.0)
+##  pROC           1.17.0.1   2021-01-13 [1] CRAN (R 4.1.0)
+##  processx       3.5.2      2021-04-30 [1] CRAN (R 4.1.0)
+##  prodlim        2019.11.13 2019-11-17 [1] CRAN (R 4.1.0)
+##  ps             1.6.0      2021-02-28 [1] CRAN (R 4.1.0)
+##  purrr        * 0.3.4      2020-04-17 [1] CRAN (R 4.1.0)
+##  R6             2.5.0      2020-10-28 [1] CRAN (R 4.1.0)
+##  Rcpp           1.0.6      2021-01-15 [1] CRAN (R 4.1.0)
+##  readr        * 1.4.0      2020-10-05 [1] CRAN (R 4.1.0)
+##  readxl         1.3.1      2019-03-13 [1] CRAN (R 4.1.0)
+##  recipes      * 0.1.16     2021-04-16 [1] CRAN (R 4.1.0)
+##  remotes        2.3.0      2021-04-01 [1] CRAN (R 4.1.0)
+##  reprex         2.0.0      2021-04-02 [1] CRAN (R 4.1.0)
+##  reshape2       1.4.4      2020-04-09 [1] CRAN (R 4.1.0)
+##  rlang          0.4.11     2021-04-30 [1] CRAN (R 4.1.0)
+##  rmarkdown      2.8        2021-05-07 [1] CRAN (R 4.1.0)
+##  rpart          4.1-15     2019-04-12 [1] CRAN (R 4.1.0)
+##  rprojroot      2.0.2      2020-11-15 [1] CRAN (R 4.1.0)
+##  rsample      * 0.1.0      2021-05-08 [1] CRAN (R 4.1.0)
+##  rstudioapi     0.13       2020-11-12 [1] CRAN (R 4.1.0)
+##  rvest          1.0.0      2021-03-09 [1] CRAN (R 4.1.0)
+##  sass           0.4.0      2021-05-12 [1] CRAN (R 4.1.0)
+##  scales         1.1.1      2020-05-11 [1] CRAN (R 4.1.0)
+##  sessioninfo    1.1.1      2018-11-05 [1] CRAN (R 4.1.0)
+##  stringi        1.6.1      2021-05-10 [1] CRAN (R 4.1.0)
+##  stringr      * 1.4.0      2019-02-10 [1] CRAN (R 4.1.0)
+##  survival       3.2-11     2021-04-26 [1] CRAN (R 4.1.0)
+##  testthat       3.0.2      2021-02-14 [1] CRAN (R 4.1.0)
+##  tibble       * 3.1.2      2021-05-16 [1] CRAN (R 4.1.0)
+##  tidyr        * 1.1.3      2021-03-03 [1] CRAN (R 4.1.0)
+##  tidyselect     1.1.1      2021-04-30 [1] CRAN (R 4.1.0)
+##  tidyverse    * 1.3.1      2021-04-15 [1] CRAN (R 4.1.0)
+##  timeDate       3043.102   2018-02-21 [1] CRAN (R 4.1.0)
+##  usethis        2.0.1      2021-02-10 [1] CRAN (R 4.1.0)
+##  utf8           1.2.1      2021-03-12 [1] CRAN (R 4.1.0)
+##  vctrs          0.3.8      2021-04-29 [1] CRAN (R 4.1.0)
+##  withr          2.4.2      2021-04-18 [1] CRAN (R 4.1.0)
+##  xfun           0.22       2021-03-11 [1] CRAN (R 4.1.0)
+##  xml2           1.3.2      2020-04-23 [1] CRAN (R 4.1.0)
+##  yaml           2.2.1      2020-02-01 [1] CRAN (R 4.1.0)
+## 
+## [1] /Library/Frameworks/R.framework/Versions/4.1-arm64/Resources/library</code></pre>
+</div>

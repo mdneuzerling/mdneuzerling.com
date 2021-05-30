@@ -7,7 +7,7 @@ tags:
     - R
 images: ["/img/gears.jpg"]
 featuredalt: Three interlocking metal gears
-output: hugodown::md_document
+
 ---
 
 I'm obsessed with how to structure a data science project. The time I spend worrying about project structure would be better spent on actually writing code. Here's my preferred R workflow, and a few notes on Python as well.
@@ -76,9 +76,7 @@ R code can be served as an API with [the `plumber` package](https://www.rplumber
 
 I use Python almost every day, but I hadn't given a lot of thought on how to structure a Python project. I reached out to Twitter to see if there was a standard.
 
-```{r tweet, echo = FALSE}
-tweetrmd::tweet_screenshot("https://twitter.com/mdneuzerling/status/1281737241610473472")
-```
+![Tweet by mdneuzerling: (Python) How do you structure your projects when you know it’s going to be a complicated piece of work? Do you just start making notebooks, or do you carefully set up a module structure first? Do python projects have a “refactor notebooks to scripts” phase?](figs/tweet-1.png)
 
 [Thank you to everyone who responded to this!](https://twitter.com/mdneuzerling/status/1281737241610473472) I learnt a lot.
 

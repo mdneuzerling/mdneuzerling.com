@@ -1,0 +1,384 @@
+---
+title: 'useR: Getting started with R and Docker'
+author: ''
+date: '2018-07-10'
+# weight: 2
+slug: user-getting-started-with-r-and-docker
+categories: []
+tags: [R, conference]
+images: ["/img/useR/tutorial_one.png"]
+featuredalt: "useR2018 Tutorial One"
+output: hugodown::hugo_document
+---
+
+<script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
+
+
+<p>These are my notes for the super helpful tutorial given by
+<a href="https://twitter.com/tech_is_dead">Elizabeth Stark</a> on the first day of the
+UseR 2018 conference. This was an introduction to Docker for R users who have
+no prior experience with Docker (which was me!).</p>
+<ul>
+<li><a href="https://github.com/SymbolixAU/useR_docker_tutorial">Elizabeth’s slides</a></li>
+<li><a href="https://github.com/SymbolixAU/R_docker_hello">Elizabeth’s exercises and examples</a></li>
+</ul>
+<p>This tutorial took me through setting up an RStudio Server container. I’m on a
+Linux machine, but I’m particularly interested by the idea that you could run
+these traditionally Linux-only servers on a Windows machine through Docker.</p>
+<div id="docker-glossary" class="section level2">
+<h2>Docker glossary</h2>
+<ul>
+<li>A container is like a virtual machine, but it just has the user-space stuff.
+It consists of:
+<ul>
+<li>A Docker image. This is an <a href="https://docs.docker.com/glossary/?term=image">“ordered collection of root filesystem changes
+and the corresponding execution parameters for use within a container
+runtime.”</a></li>
+<li>An execution environment</li>
+<li>A standard set of instructions</li>
+</ul></li>
+<li>A Dockerfile is like source code for an image.</li>
+<li>Docker is software that builds images and runs containers. Its logo is an
+adorable whale/cargo ship.</li>
+</ul>
+<p>I will admit, the difference between an image and a container confuses me. From
+what I can tell, you <code>build</code> an <strong>image</strong>, and then when you <code>run</code> the image it
+turns into a <strong>container</strong>. Images are layered on top of one another. The <code>run</code>
+command takes an image, adds a file system, and executes some instructions.</p>
+<p>It sounds like a virtual machine to me, though. But a virtual machine has a
+guest operating system, whereas a container doesn’t. Docker provides the guest
+operating system, and the container provides the application and the libraries.
+The advantage here is that a virtual machine has to boot, which can take a long
+time, whereas Docker images can be run in seconds.</p>
+<p>Containers are ephemeral. Any changes to a running container, such as new user
+data, will disappear as soon as Docker stops running the container.</p>
+</div>
+<div id="running-docker-images" class="section level2">
+<h2>Running docker images</h2>
+<p>Docker images require <code>sudo</code> by default. You can do without <code>sudo</code> by adding
+your use to the docker group, but this carries some security implications. In
+particular, users in the group will have unmoderated access to the root
+filesystem. I’ve added myself to the group for the duration of this tutorial. <a href="https://www.projectatomic.io/blog/2015/08/why-we-dont-let-non-root-users-run-docker-in-centos-fedora-or-rhel/">This article</a> gives a good rundown of why you might <em>not</em> want to allow
+non-root access to Docker.</p>
+<p>The first Docker image you ever <code>run</code> is likely to be <code>hello-world</code>. If you’ve
+never run it before, Docker will download it from <a href="https://hub.docker.com">Docker Hub</a>.</p>
+<pre class="bash"><code>docker run hello-world</code></pre>
+<pre><code>## 
+## Hello from Docker!
+## This message shows that your installation appears to be working correctly.
+## 
+## To generate this message, Docker took the following steps:
+##  1. The Docker client contacted the Docker daemon.
+##  2. The Docker daemon pulled the &quot;hello-world&quot; image from the Docker Hub.
+##     (arm64v8)
+##  3. The Docker daemon created a new container from that image which runs the
+##     executable that produces the output you are currently reading.
+##  4. The Docker daemon streamed that output to the Docker client, which sent it
+##     to your terminal.
+## 
+## To try something more ambitious, you can run an Ubuntu container with:
+##  $ docker run -it ubuntu bash
+## 
+## Share images, automate workflows, and more with a free Docker ID:
+##  https://hub.docker.com/
+## 
+## For more examples and ideas, visit:
+##  https://docs.docker.com/get-started/</code></pre>
+<p>Quick aside: yes, this is me running a Docker image in an R Markdown file.
+Remember that R Markdown can handle languages other than R, including bash!
+This code chunk is <code>{bash docker_hello_world}</code>, which tells <code>knitr</code> to run this
+chunk (called <code>docker_hello_world</code>) with bash. I imagine this only works
+because the <code>hello-world</code> container outputs to <code>stdout</code>.</p>
+</div>
+<div id="rocker" class="section level2">
+<h2>Rocker</h2>
+<p><a href="https://hub.docker.com/u/rocker/">Rocker</a> exists on <a href="https://hub.docker.com">Docker Hub</a>
+and contains a whole bunch of images relevant to R users.</p>
+<p>Dockerfiles (the source code for images) start <code>FROM</code> a base image. We can
+<code>COPY</code> files, <code>RUN</code> commands, or set <code>ENV</code> variables. Here’s the head of the
+RStudio Dockerfile:</p>
+<pre class="bash"><code>FROM rocker/r-ver:latest
+
+ARG RSTUDIO_VERSION
+ENV PATH=/usr/lib/rstudio-server/bin:$PATH
+
+## Download and install RStudio server &amp; dependencies
+## Attempts to get detect latest version, otherwise falls back to version given in $VER
+## Symlink pandoc, pandoc-citeproc so they are available system-wide
+RUN apt-get update \
+  &amp;&amp; apt-get install -y --no-install-recommends \
+    file \
+    git \
+    libapparmor1 \
+    libcurl4-openssl-dev \
+    libedit2 \
+    libssl-dev \
+    lsb-release \
+    psmisc \
+    procps \
+    python-setuptools \
+    sudo \
+    wget \
+  &amp;&amp; wget -O libssl1.0.0.deb http://ftp.debian.org/debian/pool/main/o/openssl/libssl1.0.0_1.0.1t-1+deb8u8_amd64.deb \
+  &amp;&amp; dpkg -i libssl1.0.0.deb \
+  &amp;&amp; rm libssl1.0.0.deb \
+  &amp;&amp; RSTUDIO_LATEST=$(wget --no-check-certificate -qO- https://s3.amazonaws.com/rstudio-server/current.ver) \
+  &amp;&amp; [ -z &quot;$RSTUDIO_VERSION&quot; ] &amp;&amp; RSTUDIO_VERSION=$RSTUDIO_LATEST || true \
+  &amp;&amp; wget -q http://download2.rstudio.org/rstudio-server-${RSTUDIO_VERSION}-amd64.deb \</code></pre>
+</div>
+<div id="r-hello-world" class="section level2">
+<h2>R hello world</h2>
+<p>We’re going to build and run the example R hello world image linked at the top
+of this page. This is following Elizabeth Stark’s <a href="https://www.symbolix.com.au/blog-main/r-docker-hello">blog post</a>. First, clone the
+repository at the top of this page and <code>cd</code> into the newly created directory.</p>
+<p>Here’s the Dockerfile, which tells us what is going on here. Note the base image,
+RStudio, and a <code>requirements.R</code> file. The required R packages for the image are
+stored in this file. When the image is built, the libraries are installed.</p>
+<pre class="bash"><code># Base image https://hub.docker.com/u/rocker/
+FROM rocker/rstudio
+
+## Install extra R packages using requirements.R
+## Specify requirements as R install commands e.g.
+## 
+## install.packages(&quot;&lt;myfavouritepacakge&gt;&quot;) or
+## devtools::install(&quot;SymbolixAU/googleway&quot;)
+
+## Copy requirements.R to container directory /tmp
+COPY ./DockerConfig/requirements.R /tmp/requirements.R 
+## install required libs on container
+RUN Rscript /tmp/requirements.R
+
+# create an R user
+ENV USER rstudio
+
+## Copy your working files over
+## The $USER defaults to `rstudio` but you can change this at runtime
+COPY ./Analysis /home/$USER/Analysis
+COPY ./Data /home/$USER/Data</code></pre>
+<p>Run the following command to <code>build</code> the image:</p>
+<pre class="bash"><code>docker build --rm --force-rm -t rstudio/hello-world .</code></pre>
+<p>The <code>--rm --force-rm</code> command tells Docker to delete the container once it’s
+run. This keeps the server clean. The <code>-t rstudio/hello-world</code> option names the
+resulting image. We can see our installed Docker images, including the
+<code>hello-world</code> image we just built, by running the following command:</p>
+<pre class="bash"><code>docker image list</code></pre>
+<pre><code>## REPOSITORY              TAG       IMAGE ID       CREATED         SIZE
+## build-r-package         latest    0c38878104b7   7 weeks ago     881MB
+## &lt;none&gt;                  &lt;none&gt;    c7c5497ecd80   7 weeks ago     881MB
+## &lt;none&gt;                  &lt;none&gt;    b3f05e59d22e   7 weeks ago     881MB
+## &lt;none&gt;                  &lt;none&gt;    eadbb964ab9c   7 weeks ago     881MB
+## &lt;none&gt;                  &lt;none&gt;    63164e3fe383   7 weeks ago     881MB
+## &lt;none&gt;                  &lt;none&gt;    0e4caf4357f6   7 weeks ago     881MB
+## &lt;none&gt;                  &lt;none&gt;    70c49f07b0ee   7 weeks ago     881MB
+## &lt;none&gt;                  &lt;none&gt;    79a49de0428e   7 weeks ago     881MB
+## &lt;none&gt;                  &lt;none&gt;    66a5e04ad738   7 weeks ago     881MB
+## &lt;none&gt;                  &lt;none&gt;    081da828f813   7 weeks ago     881MB
+## r-package-compilation   latest    a3a66f02565c   7 weeks ago     1.96GB
+## &lt;none&gt;                  &lt;none&gt;    fb647dc9d4d5   7 weeks ago     634MB
+## &lt;none&gt;                  &lt;none&gt;    188c4acb2ebc   7 weeks ago     1.7GB
+## &lt;none&gt;                  &lt;none&gt;    ece3fabd7fa4   8 weeks ago     1.12GB
+## &lt;none&gt;                  &lt;none&gt;    d23864317d46   8 weeks ago     1.12GB
+## &lt;none&gt;                  &lt;none&gt;    219c1d836786   8 weeks ago     1.12GB
+## &lt;none&gt;                  &lt;none&gt;    8036b15a7f8a   8 weeks ago     1.12GB
+## &lt;none&gt;                  &lt;none&gt;    f26d36f5490d   8 weeks ago     1.12GB
+## &lt;none&gt;                  &lt;none&gt;    a80cfd558689   8 weeks ago     1.12GB
+## &lt;none&gt;                  &lt;none&gt;    4d6bdc754c57   8 weeks ago     1.12GB
+## &lt;none&gt;                  &lt;none&gt;    3718f3387ee5   8 weeks ago     1.12GB
+## &lt;none&gt;                  &lt;none&gt;    861a595f4b7e   8 weeks ago     1.12GB
+## &lt;none&gt;                  &lt;none&gt;    2cb6fbdf912b   8 weeks ago     1.12GB
+## &lt;none&gt;                  &lt;none&gt;    96f33eab127a   8 weeks ago     1.12GB
+## &lt;none&gt;                  &lt;none&gt;    e8e71be8d31a   8 weeks ago     1.12GB
+## &lt;none&gt;                  &lt;none&gt;    3c40d1aaf075   8 weeks ago     937MB
+## &lt;none&gt;                  &lt;none&gt;    61f6d059144b   8 weeks ago     937MB
+## &lt;none&gt;                  &lt;none&gt;    335d5ec9ab6c   8 weeks ago     937MB
+## &lt;none&gt;                  &lt;none&gt;    161436c24454   8 weeks ago     937MB
+## &lt;none&gt;                  &lt;none&gt;    702f29b746df   8 weeks ago     937MB
+## &lt;none&gt;                  &lt;none&gt;    f8f71832e790   8 weeks ago     449MB
+## &lt;none&gt;                  &lt;none&gt;    e55841e073bc   8 weeks ago     117MB
+## ubuntu                  20.04     884ea8eb730b   2 months ago    65.7MB
+## &lt;none&gt;                  &lt;none&gt;    dc3c206dbb58   2 months ago    65.7MB
+## ubuntu                  &lt;none&gt;    8e428cff54c8   2 months ago    72.9MB
+## rocker/r-ver            4.0.3     f358336e139a   2 months ago    850MB
+## hello-world             latest    a29f45ccde2a   17 months ago   9.14kB</code></pre>
+<p>Now we can <code>run</code> the image. We <code>--name</code> the container <code>hello-world</code>. You may be
+aware that RStudio server runs on port 8787 by default, but here we <code>run</code> the
+container on port 28787.</p>
+<pre class="bash"><code>docker run -d --rm -p 28787:8787 --name hello-world rstudio/hello-world</code></pre>
+<p>The command runs and then we are returned to the terminal. At first I thought
+nothing had happened and I had managed to break something this early on. But
+when I opened my browser and went to <a href="http://127.0.0.1:28787" class="uri">http://127.0.0.1:28787</a> I saw a login page!</p>
+<p><img src="img/rstudio_login.png" /></p>
+<p>The default username and password are both <code>rstudio</code>. Logging in, I see a
+familiar interface.</p>
+<p><img src="img/rstudio_in_container.png" /></p>
+<p>We can stop the container with the <code>stop</code> command. This will interrupt the
+RStudio Server instance and delete any inputted data.</p>
+<pre class="bash"><code>docker stop hello-world</code></pre>
+<div id="playing-with-the-hello-world-image" class="section level3">
+<h3>Playing with the <code>hello-world</code> image</h3>
+<ul>
+<li>The <code>docker ps</code> command lists running images.</li>
+<li>You can run the same container more than once, but they have to have different
+names and run on different ports.</li>
+<li>If you add a package to the requirements.R and rebuild, it will install the
+package and all dependencies.</li>
+<li>Set environment variables when running an image by using the <code>-e</code> option, eg.
+<code>-e USERID=$UID -e PASSWORD=SoSecret!</code></li>
+<li>Save data to a persistent location by mounting a volume using the <code>-v</code> option, eg.
+<code>-v $DATA_DIR:/home/rstudio/Data</code></li>
+</ul>
+</div>
+<div id="a-note-on-security" class="section level3">
+<h3>A note on security</h3>
+<p>For security reasons, you often can’t access environment variables (such as
+those set by <code>ENV</code> or <code>-e</code>) from RStudio Server or Shiny. Instead, you could
+include an <code>.Renviron</code> file in the build context. Be sure to configure your
+<code>.gitignore</code> file so that you don’t accidentally upload secrets to GitHub!</p>
+<p>Elizabeth went through an example with the <code>googleway</code> package, which uses
+Google Maps API keys. In the Dockerbuild file, she includes a <code>COPY</code> command
+to copy the API key to <code>/home/$USER</code>.</p>
+</div>
+<div id="managing-docker-without-leaving-r" class="section level3">
+<h3>Managing Docker without leaving R</h3>
+<p>Like many R users, I don’t like having to do anything outside of R. The
+<code>docker</code> R package uses Python (through <code>reticulate</code>) to manage Docker. See
+the <a href="https://cran.r-project.org/web/packages/docker/vignettes/Getting_Started_with_Docker.html">vignette</a>.</p>
+</div>
+</div>
+<div id="docker-on-aws" class="section level2">
+<h2>Docker on AWS</h2>
+<p>Elizabeth kindly offered to taked us through launching an EC2 instance on AWS
+and running Docker on it.</p>
+<p>We’re going to be a little bit lazy with some of the
+settings here under the assumption that we’ll delete everything when we’re done.
+If you don’t do this, you may be charged more than you intended!</p>
+<p>I already have an AWS account, although I haven’t used it in a while. You can
+see my 0 EC2 instances below:</p>
+<p><img src="img/EC2_dashboard.png" /></p>
+<p>I’m going to launch a new instance. I will first be prompted to choose the type
+of image. I’m going to go with the generic Ubuntu image at the bottom of the
+picture below:</p>
+<p><img src="img/choose_image.png" /></p>
+<p>I’ll next be asked to choose the specifications of my machine. I’m going to
+launch an instance with 4GB of RAM. As of now, this will charge me USD 0.0584
+per hour to run the instance in Sydney. I don’t see myself needing it for more
+than an hour.</p>
+<p><img src="img/select_specs.png" /></p>
+<p>Click on “Next: Configure Instance Details”. On the next page we’re going to
+change the shutdown behaviour from “Stop” to “Terminate”. This will
+permanently remove the instance when it is stopped, which is okay for now
+because we only want a temporary instance.</p>
+<p><img src="img/shutdown_terminate.png" /></p>
+<p>On the next screen, we’ll give ourselves some storage. I’m choosing 20GB here,
+which should be enough for this machine’s temporary purpose.</p>
+<p><img src="img/configure_storage.png" /></p>
+<p>When you go to launch the instance, you’ll be asked about key pairs. Create a
+new key and be sure to download the pem file. I’m going to call the keypair
+“temp_docker”.</p>
+<p><img src="img/key_pair.png" /></p>
+<p>Proceed to see that your instance is launched! You can click through here to
+see your EC2 instance up and running. Take note of the IPv4 public IP here: we
+will need this to SSH into the machine, and to access our RStudio server.</p>
+<p><img src="img/instance_monitoring.png" /></p>
+<p>You can click on the instance and then on the “Connect” button to view detailed
+instructions on how to SSH into your newly created instance. Once you’ve SSH’d
+into the machine, run the following bash command to install the Community
+Edition of Docker. If the command fails, try to install <code>docker-ce</code> instead.</p>
+<pre class="bash"><code>sudo apt-get update &amp;&amp; sudo apt-get install -y docker-io</code></pre>
+<p>You can test that the installation works by running
+<code>sudo docker run hello-world</code>, as we did locally earlier. Docker will first
+install the <code>hello-world</code> image, since it hasn’t been <code>run</code> before.</p>
+<pre class="bash"><code>sudo docker pull rocker/rstudio</code></pre>
+<p>It’s a big install (around a gigabyte) so you may have to wait a few minutes.
+Now we can run our server:</p>
+<pre class="bash"><code>sudo docker run --rm -p 8787:8787 --name rstudio rocker/rstudio</code></pre>
+<p>Remember that IPv4 address you noted earlier? Put that in the address bar of
+your browser, followed by the default RStudio port 8787. For my example, I went
+to 13.211.29.244:8787, but your instance will be running on a different IP
+address.</p>
+<p>And it won’t work!</p>
+<p>You’ll notice that the page will try to load for a while but won’t get anywhere.
+This smells like a firewall issue to me. Go back to your EC2 dashboard and
+scroll to the right to see the securty group in use by your EC2 instance. Click
+on the security group, which for me was “launch-wizard-1”. Click on “Actions”
+and “Edit inbound rules”.</p>
+<p>You’ll see that SSH is allowed through port 22 to an ip address range 0.0.0.0/0.
+This actually refers to every IP address. We’re going to add a new “Custom TCP”
+rule and allow all access to port 8787 from 0.0.0.0/0.</p>
+<p><img src="img/edit_security_group.png" /></p>
+<p>Usually we would be very concerned about security here; in general we don’t
+want everyone in the world to be able to access our R Studio server! But this
+short-lived machine isn’t used for anything important, so we can skip along here.</p>
+<p>Save your changes and return to your instances ip address, which for me was
+13.211.29.244:8787. You should see the same RStudio log-in screen that appeared
+when we ran the R <code>hello-world</code> image earlier. At this point, feel free to log
+in using the default username and password, <code>rstudio</code>.</p>
+<p>As a final step, be sure to go to your AWS dashboard to stop (and therefore
+terminate) your EC2 instance. The storage volume we created earlier <em>should</em> be
+deleted alongside the EC2 instance, but you may wish to double-check.</p>
+</div>
+<div id="and-thats-it" class="section level2">
+<h2>And that’s it!</h2>
+<p>That’s the end of the workshop. Many thanks to Elizabeth for her time, and for
+a great start to useR 2018!</p>
+<hr />
+<pre class="r"><code>devtools::session_info()</code></pre>
+<pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
+##  setting  value                       
+##  version  R version 4.1.0 (2021-05-18)
+##  os       macOS Big Sur 11.3          
+##  system   aarch64, darwin20           
+##  ui       X11                         
+##  language (EN)                        
+##  collate  en_AU.UTF-8                 
+##  ctype    en_AU.UTF-8                 
+##  tz       Australia/Melbourne         
+##  date     2021-05-30                  
+## 
+## ─ Packages ───────────────────────────────────────────────────────────────────
+##  package     * version date       lib source        
+##  blogdown      1.3     2021-04-14 [1] CRAN (R 4.1.0)
+##  bookdown      0.22    2021-04-22 [1] CRAN (R 4.1.0)
+##  bslib         0.2.5.1 2021-05-18 [1] CRAN (R 4.1.0)
+##  cachem        1.0.4   2021-02-13 [1] CRAN (R 4.1.0)
+##  callr         3.7.0   2021-04-20 [1] CRAN (R 4.1.0)
+##  cli           2.5.0   2021-04-26 [1] CRAN (R 4.1.0)
+##  crayon        1.4.1   2021-02-08 [1] CRAN (R 4.1.0)
+##  desc          1.3.0   2021-03-05 [1] CRAN (R 4.1.0)
+##  devtools      2.4.0   2021-04-07 [1] CRAN (R 4.1.0)
+##  digest        0.6.27  2020-10-24 [1] CRAN (R 4.1.0)
+##  ellipsis      0.3.2   2021-04-29 [1] CRAN (R 4.1.0)
+##  evaluate      0.14    2019-05-28 [1] CRAN (R 4.1.0)
+##  fastmap       1.1.0   2021-01-25 [1] CRAN (R 4.1.0)
+##  fs            1.5.0   2020-07-31 [1] CRAN (R 4.1.0)
+##  glue          1.4.2   2020-08-27 [1] CRAN (R 4.1.0)
+##  htmltools     0.5.1.1 2021-01-22 [1] CRAN (R 4.1.0)
+##  jquerylib     0.1.4   2021-04-26 [1] CRAN (R 4.1.0)
+##  jsonlite      1.7.2   2020-12-09 [1] CRAN (R 4.1.0)
+##  knitr         1.33    2021-04-24 [1] CRAN (R 4.1.0)
+##  lifecycle     1.0.0   2021-02-15 [1] CRAN (R 4.1.0)
+##  magrittr      2.0.1   2020-11-17 [1] CRAN (R 4.1.0)
+##  memoise       2.0.0   2021-01-26 [1] CRAN (R 4.1.0)
+##  pkgbuild      1.2.0   2020-12-15 [1] CRAN (R 4.1.0)
+##  pkgload       1.2.1   2021-04-06 [1] CRAN (R 4.1.0)
+##  prettyunits   1.1.1   2020-01-24 [1] CRAN (R 4.1.0)
+##  processx      3.5.2   2021-04-30 [1] CRAN (R 4.1.0)
+##  ps            1.6.0   2021-02-28 [1] CRAN (R 4.1.0)
+##  purrr         0.3.4   2020-04-17 [1] CRAN (R 4.1.0)
+##  R6            2.5.0   2020-10-28 [1] CRAN (R 4.1.0)
+##  remotes       2.3.0   2021-04-01 [1] CRAN (R 4.1.0)
+##  rlang         0.4.11  2021-04-30 [1] CRAN (R 4.1.0)
+##  rmarkdown     2.8     2021-05-07 [1] CRAN (R 4.1.0)
+##  rprojroot     2.0.2   2020-11-15 [1] CRAN (R 4.1.0)
+##  sass          0.4.0   2021-05-12 [1] CRAN (R 4.1.0)
+##  sessioninfo   1.1.1   2018-11-05 [1] CRAN (R 4.1.0)
+##  stringi       1.6.1   2021-05-10 [1] CRAN (R 4.1.0)
+##  stringr       1.4.0   2019-02-10 [1] CRAN (R 4.1.0)
+##  testthat      3.0.2   2021-02-14 [1] CRAN (R 4.1.0)
+##  usethis       2.0.1   2021-02-10 [1] CRAN (R 4.1.0)
+##  withr         2.4.2   2021-04-18 [1] CRAN (R 4.1.0)
+##  xfun          0.22    2021-03-11 [1] CRAN (R 4.1.0)
+##  yaml          2.2.1   2020-02-01 [1] CRAN (R 4.1.0)
+## 
+## [1] /Library/Frameworks/R.framework/Versions/4.1-arm64/Resources/library</code></pre>
+</div>

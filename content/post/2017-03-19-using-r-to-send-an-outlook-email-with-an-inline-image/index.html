@@ -1,0 +1,118 @@
+---
+title: Using R to send an Outlook email with an inline image
+author: ~
+date: '2017-03-19'
+slug: using-r-to-send-an-outlook-email-with-an-inline-image
+categories: []
+tags: [R]
+description: ''
+images: ["/img/sending_an_email_with_rdcomclient.png"]
+featuredpath: 'img'
+
+---
+
+<script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
+
+
+<p>If you work in a corporate environment, there’s a good chance you’re using
+Microsoft Office. I wanted to set up a way to email tables and plots from R
+using Outlook. Sending an email is simple enough with the <a href="http://www.omegahat.net/RDCOMClient/">RDCOMClient</a> library, but
+inserting a plot inline—rather than as an attachment—took a little bit of
+working out. I’m sharing my code here in case anyone else wants to do something
+similar. The trick is to save your plot as an image with a temporary file,
+attach it to the email, and then insert it inline using a cid (Content-ID).</p>
+<pre class="r"><code>library(ggplot2)
+
+# Create a simple scatterplot with ggplo2
+SimplePlot &lt;- ggplot(mtcars, aes(x=wt, y=mpg)) + geom_point()
+# Create a temporary file path for the image that we will attach to our email
+SimplePlot.file &lt;- tempfile(fileext = &quot;.png&quot;)
+# Save the ggplot we just created as an image with the temporary file path
+ggsave(plot = SimplePlot, file = SimplePlot.file,
+        device = &quot;png&quot;, width = 4, height = 4)
+
+# Create an Outlook object, a new email, and set the parameters.
+Outlook &lt;- RDCOMClient::COMCreate(&quot;Outlook.Application&quot;)
+Email &lt;- Outlook$CreateItem(0)
+Email[[&quot;To&quot;]] &lt;- &quot;johnsmith@example.com&quot;
+Email[[&quot;subject&quot;]] &lt;- &quot;A simple scatterplot&quot;
+# Some text before we insert our plot
+Body &lt;- &quot;&lt;p&gt;Your scatterplot is here:&lt;/p&gt;&quot;
+
+# First add the temporary file as an attachment.
+Email[[&quot;Attachments&quot;]]$Add(SimplePlot.file)
+# Refer to the attachment with a cid
+# &quot;basename&quot; returns the file name without the directory.
+SimplePlot.inline &lt;- paste0( &quot;&lt;img src=&#39;cid:&quot;,
+        basename(SimplePlot.file),
+        &quot;&#39; width = &#39;400&#39; height = &#39;400&#39;&gt;&quot;)
+# Put the text and plot together in the body of the email.
+Email[[&quot;HTMLBody&quot;]] &lt;- paste0(Body, SimplePlot.inline)
+
+# Either display the email in Outlook or send it straight away.
+# Comment out either line.
+Email$Display()
+#Email$Send()
+
+# Delete the temporary file used to attach images.
+unlink(SimplePlot.file)</code></pre>
+<hr />
+<pre class="r"><code>devtools::session_info()</code></pre>
+<pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
+##  setting  value                       
+##  version  R version 4.1.0 (2021-05-18)
+##  os       macOS Big Sur 11.3          
+##  system   aarch64, darwin20           
+##  ui       X11                         
+##  language (EN)                        
+##  collate  en_AU.UTF-8                 
+##  ctype    en_AU.UTF-8                 
+##  tz       Australia/Melbourne         
+##  date     2021-05-30                  
+## 
+## ─ Packages ───────────────────────────────────────────────────────────────────
+##  package     * version date       lib source        
+##  blogdown      1.3     2021-04-14 [1] CRAN (R 4.1.0)
+##  bookdown      0.22    2021-04-22 [1] CRAN (R 4.1.0)
+##  bslib         0.2.5.1 2021-05-18 [1] CRAN (R 4.1.0)
+##  cachem        1.0.4   2021-02-13 [1] CRAN (R 4.1.0)
+##  callr         3.7.0   2021-04-20 [1] CRAN (R 4.1.0)
+##  cli           2.5.0   2021-04-26 [1] CRAN (R 4.1.0)
+##  crayon        1.4.1   2021-02-08 [1] CRAN (R 4.1.0)
+##  desc          1.3.0   2021-03-05 [1] CRAN (R 4.1.0)
+##  devtools      2.4.0   2021-04-07 [1] CRAN (R 4.1.0)
+##  digest        0.6.27  2020-10-24 [1] CRAN (R 4.1.0)
+##  ellipsis      0.3.2   2021-04-29 [1] CRAN (R 4.1.0)
+##  evaluate      0.14    2019-05-28 [1] CRAN (R 4.1.0)
+##  fastmap       1.1.0   2021-01-25 [1] CRAN (R 4.1.0)
+##  fs            1.5.0   2020-07-31 [1] CRAN (R 4.1.0)
+##  glue          1.4.2   2020-08-27 [1] CRAN (R 4.1.0)
+##  htmltools     0.5.1.1 2021-01-22 [1] CRAN (R 4.1.0)
+##  jquerylib     0.1.4   2021-04-26 [1] CRAN (R 4.1.0)
+##  jsonlite      1.7.2   2020-12-09 [1] CRAN (R 4.1.0)
+##  knitr         1.33    2021-04-24 [1] CRAN (R 4.1.0)
+##  lifecycle     1.0.0   2021-02-15 [1] CRAN (R 4.1.0)
+##  magrittr      2.0.1   2020-11-17 [1] CRAN (R 4.1.0)
+##  memoise       2.0.0   2021-01-26 [1] CRAN (R 4.1.0)
+##  pkgbuild      1.2.0   2020-12-15 [1] CRAN (R 4.1.0)
+##  pkgload       1.2.1   2021-04-06 [1] CRAN (R 4.1.0)
+##  prettyunits   1.1.1   2020-01-24 [1] CRAN (R 4.1.0)
+##  processx      3.5.2   2021-04-30 [1] CRAN (R 4.1.0)
+##  ps            1.6.0   2021-02-28 [1] CRAN (R 4.1.0)
+##  purrr         0.3.4   2020-04-17 [1] CRAN (R 4.1.0)
+##  R6            2.5.0   2020-10-28 [1] CRAN (R 4.1.0)
+##  remotes       2.3.0   2021-04-01 [1] CRAN (R 4.1.0)
+##  rlang         0.4.11  2021-04-30 [1] CRAN (R 4.1.0)
+##  rmarkdown     2.8     2021-05-07 [1] CRAN (R 4.1.0)
+##  rprojroot     2.0.2   2020-11-15 [1] CRAN (R 4.1.0)
+##  sass          0.4.0   2021-05-12 [1] CRAN (R 4.1.0)
+##  sessioninfo   1.1.1   2018-11-05 [1] CRAN (R 4.1.0)
+##  stringi       1.6.1   2021-05-10 [1] CRAN (R 4.1.0)
+##  stringr       1.4.0   2019-02-10 [1] CRAN (R 4.1.0)
+##  testthat      3.0.2   2021-02-14 [1] CRAN (R 4.1.0)
+##  usethis       2.0.1   2021-02-10 [1] CRAN (R 4.1.0)
+##  withr         2.4.2   2021-04-18 [1] CRAN (R 4.1.0)
+##  xfun          0.22    2021-03-11 [1] CRAN (R 4.1.0)
+##  yaml          2.2.1   2020-02-01 [1] CRAN (R 4.1.0)
+## 
+## [1] /Library/Frameworks/R.framework/Versions/4.1-arm64/Resources/library</code></pre>

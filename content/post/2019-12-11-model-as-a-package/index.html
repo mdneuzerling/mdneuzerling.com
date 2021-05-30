@@ -1,0 +1,95 @@
+---
+title: Model as a package
+author: ''
+date: '2019-12-11'
+slug: model-as-a-package
+tags:
+    - R
+images: ["/img/ModelAsAPackage.png"]
+featuredalt: "Word cloud of review text"
+
+---
+
+<script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
+
+
+<p>There’s a concept in R of an <a href="https://www.r-bloggers.com/creating-an-analysis-as-a-package-and-vignette">analysis as a package</a>, in which everything you need for your data analysis is contained within a custom package. When you install the package and build the vignettes, the data analysis is performed and results saved as a pretty HTML or PDF file, generated with R Markdown. I wanted to extend this concept to a machine learning <strong>model as a package</strong>.</p>
+<p>The idea here is that, using vignettes, we can make equivalent installing a package with training a model. The functions in the package can be used in model training or for scoring new data, probably with some overlap. To demonstrate this I’ve created a simple sentiment analysis model based on <a href="https://archive.ics.uci.edu/ml/datasets/Sentiment+Labelled+Sentences">review data from the UCI Machine Learning Repository</a>.</p>
+<p><a href="https://github.com/mdneuzerling/ModelAsAPackage">You can check out the repository for the model/package here</a>. I’ve also copied <a href="/rmd/ModelAsAPackage.html">the output of the vignette</a> so you can see what’s knitted when the package is installed. You can install this package with <code>devtools::install_github("mdneuzerling/ModelAsAPackage", build_vignettes = TRUE)</code>. The package can be loaded and attached as any other package would be and the training vignette opened with <code>vignette("model-training", package = "ModelAsAPackage")</code>.</p>
+<p>Want to see the (not-so-great) model score some text? Try giving an argument to the <code>sentiment</code> function. I’m happy to report that <code>sentiment("love") == "good"</code>.</p>
+<p>I thought this might work because of a few things:</p>
+<ul>
+<li>Vignettes are created before the source code is bundled, so in theory we can train a model before the package has finished compiling.</li>
+<li>R uses lazy evaluation, so if a package function refers to an object that doesn’t yet exist (because it hasn’t been created by the vignette) that’s okay.</li>
+<li>I like using the same functions for model training as I do for model scoring, like the <code>map_to_dtm</code> function in this package.</li>
+<li>I wanted to take full advantage of <code>roxygen2</code> for documenting package functions, and <code>testthat</code> for unit tests. I especially like the ease with which you can test within RStudio.</li>
+</ul>
+<p>However, I have my doubts:</p>
+<ul>
+<li>In order for tests to work, I have to run <code>devtools::build_vignettes</code> before running <code>devtools::install</code>. There’s something here with namespaces whereby the data objects suddenly become “unexported” after tests are attempted. I don’t know why!</li>
+<li>There are some relative paths in the code. I’m assuming that the working directory is <code>&lt;package_root&gt;/vignettes</code> when this vignette is knitted, so I can move up one level to obtain the root directory of the package. This should be okay if we’re following the standard package structure, but I’ve been hurt too many times by relative file paths to feel comfortable about this.</li>
+<li>I’m not sure how this would operate with the <code>plumber</code> package. I don’t know if we can integrate the expected <code>plumber.R</code> function in the package, except for sticking it in the <code>inst</code> directory and then finding it with <code>system.file</code>.</li>
+<li>This all seems like a lot of complexity for not too much benefit. Maybe doing this again would be easier now that I have a template.</li>
+</ul>
+<p>These sorts of projects should be shared, even if I don’t think that this is a major success!</p>
+<p>A quick shout out for <a href="http://r-pkgs.had.co.nz/">the excellent book on R packages by Hadley Wickham</a>. It’s well worth keeping bookmarked.</p>
+<hr />
+<pre class="r"><code>devtools::session_info()</code></pre>
+<pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
+##  setting  value                       
+##  version  R version 4.1.0 (2021-05-18)
+##  os       macOS Big Sur 11.3          
+##  system   aarch64, darwin20           
+##  ui       X11                         
+##  language (EN)                        
+##  collate  en_AU.UTF-8                 
+##  ctype    en_AU.UTF-8                 
+##  tz       Australia/Melbourne         
+##  date     2021-05-30                  
+## 
+## ─ Packages ───────────────────────────────────────────────────────────────────
+##  package     * version date       lib source        
+##  blogdown      1.3     2021-04-14 [1] CRAN (R 4.1.0)
+##  bookdown      0.22    2021-04-22 [1] CRAN (R 4.1.0)
+##  bslib         0.2.5.1 2021-05-18 [1] CRAN (R 4.1.0)
+##  cachem        1.0.4   2021-02-13 [1] CRAN (R 4.1.0)
+##  callr         3.7.0   2021-04-20 [1] CRAN (R 4.1.0)
+##  cli           2.5.0   2021-04-26 [1] CRAN (R 4.1.0)
+##  crayon        1.4.1   2021-02-08 [1] CRAN (R 4.1.0)
+##  desc          1.3.0   2021-03-05 [1] CRAN (R 4.1.0)
+##  devtools      2.4.0   2021-04-07 [1] CRAN (R 4.1.0)
+##  digest        0.6.27  2020-10-24 [1] CRAN (R 4.1.0)
+##  ellipsis      0.3.2   2021-04-29 [1] CRAN (R 4.1.0)
+##  evaluate      0.14    2019-05-28 [1] CRAN (R 4.1.0)
+##  fastmap       1.1.0   2021-01-25 [1] CRAN (R 4.1.0)
+##  fs            1.5.0   2020-07-31 [1] CRAN (R 4.1.0)
+##  glue          1.4.2   2020-08-27 [1] CRAN (R 4.1.0)
+##  htmltools     0.5.1.1 2021-01-22 [1] CRAN (R 4.1.0)
+##  jquerylib     0.1.4   2021-04-26 [1] CRAN (R 4.1.0)
+##  jsonlite      1.7.2   2020-12-09 [1] CRAN (R 4.1.0)
+##  knitr         1.33    2021-04-24 [1] CRAN (R 4.1.0)
+##  lifecycle     1.0.0   2021-02-15 [1] CRAN (R 4.1.0)
+##  magrittr      2.0.1   2020-11-17 [1] CRAN (R 4.1.0)
+##  memoise       2.0.0   2021-01-26 [1] CRAN (R 4.1.0)
+##  pkgbuild      1.2.0   2020-12-15 [1] CRAN (R 4.1.0)
+##  pkgload       1.2.1   2021-04-06 [1] CRAN (R 4.1.0)
+##  prettyunits   1.1.1   2020-01-24 [1] CRAN (R 4.1.0)
+##  processx      3.5.2   2021-04-30 [1] CRAN (R 4.1.0)
+##  ps            1.6.0   2021-02-28 [1] CRAN (R 4.1.0)
+##  purrr         0.3.4   2020-04-17 [1] CRAN (R 4.1.0)
+##  R6            2.5.0   2020-10-28 [1] CRAN (R 4.1.0)
+##  remotes       2.3.0   2021-04-01 [1] CRAN (R 4.1.0)
+##  rlang         0.4.11  2021-04-30 [1] CRAN (R 4.1.0)
+##  rmarkdown     2.8     2021-05-07 [1] CRAN (R 4.1.0)
+##  rprojroot     2.0.2   2020-11-15 [1] CRAN (R 4.1.0)
+##  sass          0.4.0   2021-05-12 [1] CRAN (R 4.1.0)
+##  sessioninfo   1.1.1   2018-11-05 [1] CRAN (R 4.1.0)
+##  stringi       1.6.1   2021-05-10 [1] CRAN (R 4.1.0)
+##  stringr       1.4.0   2019-02-10 [1] CRAN (R 4.1.0)
+##  testthat      3.0.2   2021-02-14 [1] CRAN (R 4.1.0)
+##  usethis       2.0.1   2021-02-10 [1] CRAN (R 4.1.0)
+##  withr         2.4.2   2021-04-18 [1] CRAN (R 4.1.0)
+##  xfun          0.22    2021-03-11 [1] CRAN (R 4.1.0)
+##  yaml          2.2.1   2020-02-01 [1] CRAN (R 4.1.0)
+## 
+## [1] /Library/Frameworks/R.framework/Versions/4.1-arm64/Resources/library</code></pre>

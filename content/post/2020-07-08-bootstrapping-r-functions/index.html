@@ -1,0 +1,188 @@
+---
+title: Bootstrapping R functions
+author: ~
+date: '2020-07-08'
+slug: bootstrapping-r-functions
+tags:
+    - R
+images: ["/img/crime-scene.jpeg"]
+featuredalt: |
+    Tape that reads "Crime Scene".
+
+---
+
+<script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
+
+
+<p>Suppose I want a function that runs some setup code before it runs the first time. Maybe I’m using dplyr but I haven’t properly declared all of my dplyr calls in my function, so I want to run <code>library(dplyr)</code> before the actual function is run. Or maybe I want to install a package if it isn’t already installed, or restore a <code>renv</code> file, or any other setup process. I only want this special code to run the first time my function is called. After that, the function that runs should be exactly as I declared it, with none of the setup code.</p>
+<p>Here’s what I do:</p>
+<ol style="list-style-type: decimal">
+<li>Create a new function with the same signature as my target function.</li>
+<li>Capture my setup code, and evaluate it when my new bootstrapping function is called.</li>
+<li>When my bootstrapping function is being executed, make it redefine itself with my target function in the same environment.</li>
+<li>After the redefinition, call the function again, which is now the redefined function, which is now my target function.</li>
+</ol>
+<p>And then, to make things even more bizarre, I wrap this process up in a function-generating function that does all of this for me, with an input of just a function and some setup code.</p>
+<p>By the way, I’m not actually suggesting you do this. It’s a <em>wild</em> idea. Functions redefining themselves is an uncomfortable concept. And the idea that a function is running complicated setup code that isn’t even hinted at in the function name makes me uneasy as well. But you <strong>can</strong> do this. So here it is:</p>
+<pre class="r"><code>bootstrapping_function &lt;- function(fn, setup) {
+  setup &lt;- substitute(setup)
+  bootstrapping_function &lt;- fn # Copy the function so we can keep its formals
+  body(bootstrapping_function) &lt;- substitute({
+    # The name of the function that&#39;s currently being executed.
+    this_function_name &lt;- as.character(match.call()[[1]])
+
+    # We want to redefine the function in the same environment in which it&#39;s
+    # currently defined. This function crawls up the environment hierarchy
+    # until it finds an object with the right name. Possible improvement:
+    # ignore any objects with the right name if they aren&#39;t functions.
+    which_environment &lt;- function(name, env = parent.frame()) {
+      # Adapted from http://adv-r.had.co.nz/Environments.html
+      if (identical(env, emptyenv())) {
+        stop(&quot;Can&#39;t find &quot;, name, call. = FALSE)
+      } else if (exists(name, envir = env, inherits = FALSE)) {
+        env
+      } else {
+        which_environment(name, parent.env(env))
+      }
+    }
+    this_function_env &lt;- which_environment(this_function_name)
+
+    # Recover the arguments that are being provided to this function at
+    # run-time, as a list. This lets us execute the function again after it&#39;s
+    # been redefined.
+    get_args &lt;- function() {
+      # Adapted from https://stackoverflow.com/a/47955845/8456369
+      parent_formals &lt;- formals(sys.function(sys.parent(n = 1)))
+      fnames &lt;- names(parent_formals)
+      without_ellipses &lt;- fnames[fnames != &quot;...&quot;]
+      args &lt;- evalq(as.list(environment()), envir = parent.frame())
+      if (&quot;...&quot; %in% fnames) {
+        c(args[without_ellipses], evalq(list(...), envir = parent.frame()))
+      } else {
+        args[without_ellipses]
+      }
+    }
+
+    fn_location &lt;- which_environment(this_function_name)
+    eval(setup, parent.frame(2)) # evaluate in caller_env
+    assign(this_function_name, fn, this_function_env) # here&#39;s the redefinition
+    do.call( # call the function again with the same arguments
+      this_function_name,
+      args = get_args(),
+      envir = parent.frame(2)
+    )
+  })
+  bootstrapping_function
+}</code></pre>
+<p>I haven’t thrown a lot of test cases at this code yet, but here’s a simple example: take a data frame and add 1 to every numeric column. I’ve written the code with dplyr, but I’ve used <code>mutate_if</code> instead of <code>dplyr::mutate_if</code>. I’ll need to call <code>library(dplyr)</code> before I run this function. I’ll put an extra <code>message()</code> in the setup code to make it clear that I’m actually running the setup.</p>
+<pre class="r"><code>add_1_to_all_numeric_columns &lt;- bootstrapping_function(
+  function(df) mutate_if(df, is.numeric, ~.x + 1),
+  setup = {
+    message(&quot;Setting up the function to add 1 to all numeric columns&quot;)
+    library(dplyr)
+  }
+)</code></pre>
+<p>Let’s run this monstrousity:</p>
+<pre class="r"><code>head(add_1_to_all_numeric_columns(mtcars))</code></pre>
+<pre><code>## Setting up the function to add 1 to all numeric columns</code></pre>
+<pre><code>## 
+## Attaching package: &#39;dplyr&#39;</code></pre>
+<pre><code>## The following objects are masked from &#39;package:stats&#39;:
+## 
+##     filter, lag</code></pre>
+<pre><code>## The following objects are masked from &#39;package:base&#39;:
+## 
+##     intersect, setdiff, setequal, union</code></pre>
+<pre><code>##                    mpg cyl disp  hp drat    wt  qsec vs am gear carb
+## Mazda RX4         22.0   7  161 111 4.90 3.620 17.46  1  2    5    5
+## Mazda RX4 Wag     22.0   7  161 111 4.90 3.875 18.02  1  2    5    5
+## Datsun 710        23.8   5  109  94 4.85 3.320 19.61  2  2    5    2
+## Hornet 4 Drive    22.4   7  259 111 4.08 4.215 20.44  2  1    4    2
+## Hornet Sportabout 19.7   9  361 176 4.15 4.440 18.02  1  1    4    3
+## Valiant           19.1   7  226 106 3.76 4.460 21.22  2  1    4    2</code></pre>
+<p>Sure enough, the function has been redefined:</p>
+<pre class="r"><code>add_1_to_all_numeric_columns</code></pre>
+<pre><code>## function(df) mutate_if(df, is.numeric, ~.x + 1)
+## &lt;bytecode: 0x10e352a38&gt;
+## &lt;environment: 0x10f13c598&gt;</code></pre>
+<p>And now, if I run it a second time, there’s no setup:</p>
+<pre class="r"><code>head(add_1_to_all_numeric_columns(mtcars))</code></pre>
+<pre><code>##                    mpg cyl disp  hp drat    wt  qsec vs am gear carb
+## Mazda RX4         22.0   7  161 111 4.90 3.620 17.46  1  2    5    5
+## Mazda RX4 Wag     22.0   7  161 111 4.90 3.875 18.02  1  2    5    5
+## Datsun 710        23.8   5  109  94 4.85 3.320 19.61  2  2    5    2
+## Hornet 4 Drive    22.4   7  259 111 4.08 4.215 20.44  2  1    4    2
+## Hornet Sportabout 19.7   9  361 176 4.15 4.440 18.02  1  1    4    3
+## Valiant           19.1   7  226 106 3.76 4.460 21.22  2  1    4    2</code></pre>
+<hr />
+<pre class="r"><code>devtools::session_info()</code></pre>
+<pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
+##  setting  value                       
+##  version  R version 4.1.0 (2021-05-18)
+##  os       macOS Big Sur 11.3          
+##  system   aarch64, darwin20           
+##  ui       X11                         
+##  language (EN)                        
+##  collate  en_AU.UTF-8                 
+##  ctype    en_AU.UTF-8                 
+##  tz       Australia/Melbourne         
+##  date     2021-05-30                  
+## 
+## ─ Packages ───────────────────────────────────────────────────────────────────
+##  package     * version date       lib source        
+##  assertthat    0.2.1   2019-03-21 [1] CRAN (R 4.1.0)
+##  blogdown      1.3     2021-04-14 [1] CRAN (R 4.1.0)
+##  bookdown      0.22    2021-04-22 [1] CRAN (R 4.1.0)
+##  bslib         0.2.5.1 2021-05-18 [1] CRAN (R 4.1.0)
+##  cachem        1.0.4   2021-02-13 [1] CRAN (R 4.1.0)
+##  callr         3.7.0   2021-04-20 [1] CRAN (R 4.1.0)
+##  cli           2.5.0   2021-04-26 [1] CRAN (R 4.1.0)
+##  crayon        1.4.1   2021-02-08 [1] CRAN (R 4.1.0)
+##  DBI           1.1.1   2021-01-15 [1] CRAN (R 4.1.0)
+##  desc          1.3.0   2021-03-05 [1] CRAN (R 4.1.0)
+##  devtools      2.4.0   2021-04-07 [1] CRAN (R 4.1.0)
+##  digest        0.6.27  2020-10-24 [1] CRAN (R 4.1.0)
+##  dplyr       * 1.0.5   2021-03-05 [1] CRAN (R 4.1.0)
+##  ellipsis      0.3.2   2021-04-29 [1] CRAN (R 4.1.0)
+##  evaluate      0.14    2019-05-28 [1] CRAN (R 4.1.0)
+##  fansi         0.4.2   2021-01-15 [1] CRAN (R 4.1.0)
+##  fastmap       1.1.0   2021-01-25 [1] CRAN (R 4.1.0)
+##  fs            1.5.0   2020-07-31 [1] CRAN (R 4.1.0)
+##  generics      0.1.0   2020-10-31 [1] CRAN (R 4.1.0)
+##  glue          1.4.2   2020-08-27 [1] CRAN (R 4.1.0)
+##  htmltools     0.5.1.1 2021-01-22 [1] CRAN (R 4.1.0)
+##  jquerylib     0.1.4   2021-04-26 [1] CRAN (R 4.1.0)
+##  jsonlite      1.7.2   2020-12-09 [1] CRAN (R 4.1.0)
+##  knitr         1.33    2021-04-24 [1] CRAN (R 4.1.0)
+##  lifecycle     1.0.0   2021-02-15 [1] CRAN (R 4.1.0)
+##  magrittr      2.0.1   2020-11-17 [1] CRAN (R 4.1.0)
+##  memoise       2.0.0   2021-01-26 [1] CRAN (R 4.1.0)
+##  pillar        1.6.1   2021-05-16 [1] CRAN (R 4.1.0)
+##  pkgbuild      1.2.0   2020-12-15 [1] CRAN (R 4.1.0)
+##  pkgconfig     2.0.3   2019-09-22 [1] CRAN (R 4.1.0)
+##  pkgload       1.2.1   2021-04-06 [1] CRAN (R 4.1.0)
+##  prettyunits   1.1.1   2020-01-24 [1] CRAN (R 4.1.0)
+##  processx      3.5.2   2021-04-30 [1] CRAN (R 4.1.0)
+##  ps            1.6.0   2021-02-28 [1] CRAN (R 4.1.0)
+##  purrr         0.3.4   2020-04-17 [1] CRAN (R 4.1.0)
+##  R6            2.5.0   2020-10-28 [1] CRAN (R 4.1.0)
+##  remotes       2.3.0   2021-04-01 [1] CRAN (R 4.1.0)
+##  rlang         0.4.11  2021-04-30 [1] CRAN (R 4.1.0)
+##  rmarkdown     2.8     2021-05-07 [1] CRAN (R 4.1.0)
+##  rprojroot     2.0.2   2020-11-15 [1] CRAN (R 4.1.0)
+##  sass          0.4.0   2021-05-12 [1] CRAN (R 4.1.0)
+##  sessioninfo   1.1.1   2018-11-05 [1] CRAN (R 4.1.0)
+##  stringi       1.6.1   2021-05-10 [1] CRAN (R 4.1.0)
+##  stringr       1.4.0   2019-02-10 [1] CRAN (R 4.1.0)
+##  testthat      3.0.2   2021-02-14 [1] CRAN (R 4.1.0)
+##  tibble        3.1.2   2021-05-16 [1] CRAN (R 4.1.0)
+##  tidyselect    1.1.1   2021-04-30 [1] CRAN (R 4.1.0)
+##  usethis       2.0.1   2021-02-10 [1] CRAN (R 4.1.0)
+##  utf8          1.2.1   2021-03-12 [1] CRAN (R 4.1.0)
+##  vctrs         0.3.8   2021-04-29 [1] CRAN (R 4.1.0)
+##  withr         2.4.2   2021-04-18 [1] CRAN (R 4.1.0)
+##  xfun          0.22    2021-03-11 [1] CRAN (R 4.1.0)
+##  yaml          2.2.1   2020-02-01 [1] CRAN (R 4.1.0)
+## 
+## [1] /Library/Frameworks/R.framework/Versions/4.1-arm64/Resources/library</code></pre>
+<p><a href="https://www.pexels.com/photo/crime-scene-do-not-cross-signage-923681/">The image at the top of this page is in the public domain</a>.</p>

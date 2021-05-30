@@ -1,0 +1,301 @@
+---
+title: How I'd like to send an email from R
+author: ''
+date: '2018-08-15'
+slug: how-i-d-like-to-send-an-email-from-R
+categories: []
+tags:
+  - R
+images: ["/img/pipes.jpeg"]
+featuredalt: "pipes"
+
+---
+
+<script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
+
+
+<p>When I found myself using R in a corporate environment, my workflow went
+like this:</p>
+<ol style="list-style-type: decimal">
+<li>Connect to databases</li>
+<li>Do stuff to data</li>
+<li><strong>Email</strong> results</li>
+</ol>
+<p>Yes, there exist options for presenting results that are a bit more modern than
+the old-fashioned email—R Markdown, Shiny, or even Slack, for example. But
+email is embedded in corporate culture and will be around for a long time to
+come.</p>
+<p>I want to set down how I think a <code>send_email</code> function should work in R.</p>
+<div id="but-we-can-already-send-emails-in-r" class="section level2">
+<h2>But we can already send emails in R</h2>
+<p>Just sending an email is nothing new. There’s the
+<a href="https://cran.r-project.org/web/packages/sendmailR/index.html"><code>sendmailR</code></a> and
+<a href="https://cran.r-project.org/web/packages/mailR/index.html"><code>mailR</code></a>
+packages, for example. These use the SMTP protocol. Then there’s the <code>gmailr</code>
+package, which connects to gmail’s REST API to send (and receive) mail. I’ve
+played around with doing the same for Outlook (<code>outlookr</code>, anyone?), which also
+covers the Office365 environment found almost ubiquitously in older corporate
+environments.</p>
+<p>My first attempt to improving my workflow used none of that. I used
+<a href="https://github.com/omegahat/RDCOMClient">Duncan Temple Lang ’s <code>RDCOMClient</code></a>
+(also available on <a href="https://github.com/omegahat/RDCOMClient">GitHub</a>)
+to connect to a locally installed copy of Microsoft Outlook. This
+package allows R to connect to the DCOM architecture. You can think of DCOM as
+an API for communicating with Microsoft Office in Windows environments.</p>
+<p>I’ll talk about the benefits and drawbacks of DCOM later, but the main appeal
+for me is that I can connect R to the Outlook application installed on my
+(Windows) computer, and let Outlook handle all of that super tricky
+authentication nonsense. This was the appeal for me—no passwords or OAuth
+keys, because that stuff is all too <em>hard</em>.</p>
+<p>For my use case, I wanted to send things like reports and alerts. That meant
+sending ggplots and data frames, not as attachments but <em>in the body of the
+email</em>. With a lot of help from StackExchange, I worked out how to do this
+with <code>RDCOMClient</code>. I wanted to do more than just <em>send an email in R</em>. I
+wanted emailing from within R to feel like a natural extension of the
+language.</p>
+</div>
+<div id="the-prototype-rdcomoutlook" class="section level2">
+<h2>The prototype: <code>RDCOMOutlook</code></h2>
+<p>I’ve been playing around with <code>RDCOMClient</code> <a href="/post/using-r-to-send-an-outlook-email-with-an-inline-image/">for a while</a>. It was
+even responsible for my first StackExchange answer. But all of stuff I had
+learnt was scattered across a dozen stray R scripts. So I spent a week turning
+everything I had done with <code>RDCOMClient</code> into a package called <code>RDCOMOutlook</code>,
+available on <a href="https://github.com/mdneuzerling/RDCOMOutlook">GitHub</a>.</p>
+<p>I want to be clear here: this package is a proof-of-concept, and I have no plans
+to develop it any futher. I’m not submitting it to CRAN, especially since
+<code>RDCOMClient</code> itself is no longer available on CRAN. But developing the package
+helped me realise what I wanted a <code>send_email</code> function to look like.</p>
+<p>Actually, in <code>RDCOMOutlook</code> it’s called <code>prepare_email</code>. You can do this
+thing with DCOM where you get the email to pop up on the user’s screen without
+immediately sending. I thought that was cool, and I made it the default
+behaviour, with a <code>send</code> argument as an option.</p>
+</div>
+<div id="the-prototype-prepare_email" class="section level2">
+<h2>The prototype: <code>prepare_email</code></h2>
+<p>Here’s the head of the <code>prepare_email</code> function in <code>RDCOMOutlook</code>:</p>
+<pre><code>prepare_email &lt;- function(
+    embeddings = NULL,
+    body = &quot;&quot;,
+    to = &quot;&quot;,
+    cc = &quot;&quot;,
+    subject = &quot;&quot;,
+    attachments = NULL,
+    css = &quot;&quot;,
+    send = FALSE,
+    data_file_format = &quot;csv&quot;,
+    image_file_format = &quot;png&quot;
+)</code></pre>
+<p>You can see some expected stuff in there. Emails have bodies, subjects,
+recipients and (optionally) cc’d recipients and attachments. These arguments
+are natural and expected. These are HTML emails, so you can even use some
+custom CSS (I used this to put some company colours into my reports). None of
+the arguments are required; running <code>prepare_email()</code> causes a blank Outlook
+composition window to pop up on the user’s screen.</p>
+<p>But <code>embeddings</code>, <code>data_file_format</code> and <code>image_file_format</code> are a bit weirder.
+And <code>embeddings</code> is the <em>first</em> argument. The first argument in an R function is
+in a privileged position, because that’s the default target for the pipe
+(<code>%&gt;%</code>).</p>
+<p>Here’s what happens when you give object <code>obj</code> to the <code>embeddings</code>
+argument:</p>
+<ol style="list-style-type: decimal">
+<li>If <code>obj</code> is a ggplot, it will be embedded into the <strong>body</strong> of the email as
+a resonably sized image.</li>
+<li>If <code>obj</code> is a data frame or tibble, it will be converted into a HTML table
+and embedded into the body of the email.</li>
+<li>If <code>obj</code> is a file path pointing to an image file, it will be embedded into
+the body of the email.</li>
+<li>If <code>obj</code> is a file path pointing to a file that isn’t an image, it will be
+passed to the <code>attachments</code> argument.</li>
+<li>Failing all of that, an error is thrown: <code>obj is not a ggplot, data frame,  tibble or valid file path. Check that the file exists.</code></li>
+</ol>
+<p>A benefit of <code>DCOM</code> is that you can get the user’s email signature as defined
+in Outlook. So I put the embedding between the provided <code>body</code> and the
+signature.</p>
+<p>The <code>attachments</code> argument follows similar logic, except it will attach a
+plot or data frame/tibble. This is where the file format arguments come into
+play. I like <code>data_file_format</code>—you might want to send an Excel file, for
+example. But I think we can do without the <code>image_file_format</code> argument. Does
+anyone really care if their image is a jpeg or a png?</p>
+</div>
+<div id="what-happens-in-the-background" class="section level2">
+<h2>What happens in the background?</h2>
+<p>To embed or attach a ggplot, we need to save it as a file in a temporary
+location. We attach the file and—if we’re embedding it—refer to the file
+name in an HTML tag using a <em>content identifider (cid)</em>. This tells the
+email client that it needs to show the attachment in the body of the email.</p>
+<p>When I first tried to do this I got some warped ggplots. You need to specify
+image dimensions in HTML, but that means <em>getting</em> the image dimensions. The
+<code>readbitmap</code> package is crucial here, since it lets me inspect the most
+commonly used image formats.</p>
+<p>At one point, I was inspecting file headers to try to guess the image format!</p>
+<pre class="r"><code>file_header &lt;- readBin(file_path, &quot;raw&quot;, n = 8)
+
+# Reference headers
+png_header &lt;- as.raw(strtoi(c(&quot;89&quot;, &quot;50&quot;, &quot;4e&quot;, &quot;47&quot;, &quot;0d&quot;, &quot;0a&quot;, &quot;1a&quot;, &quot;0a&quot;), 16))
+jpg_header &lt;- as.raw(strtoi(c(&quot;FF&quot;, &quot;D8&quot;), 16))
+bmp_header &lt;- as.raw(strtoi(c(&quot;42&quot;, &quot;4D&quot;), 16))
+gif_header &lt;- as.raw(strtoi(c(&quot;47&quot;, &quot;49&quot;, &quot;46&quot;), 16))
+
+format &lt;- if (identical(file_header, png_header)) {
+    &quot;png&quot;
+} else if (identical(file_header[1:2], jpg_header)) {
+    &quot;jpg&quot;
+} else if (identical(file_header[1:2], bmp_header)) {
+    &quot;bmp&quot;
+} else if (identical(file_header[1:3], gif_header)) {
+    &quot;gif&quot;
+} else {
+    &quot;unknown&quot;
+}</code></pre>
+<!-- Tweet about yak shaving -->
+<p>The images then have to be scaled down to a reasonable maximum size (I used
+800 pixels in either dimension), while preserving the image ratio.</p>
+<p>There’s also the matter of turning stuff into a list in R. I can run lists
+through <code>purrr</code> functions to embed/attach multiple files. But am I the only one
+who finds this really hard? Check out this hideous helper function I used:</p>
+<pre class="r"><code>make_list &lt;- function(x) {
+    if (is.null(x)) {
+        x
+    } else if (is.ggplot(x)) { # ggplots are lists
+        list(x)
+    } else if (is.data.frame(x)) {
+        list(x)  
+    } else if (is.list(x)) {
+        x
+    } else if (is.vector(x)) {
+        as.list(x)
+    } else {
+        list(x) # single item case
+    }
+}</code></pre>
+<p>Lists are also important here because lists can have <em>names</em>, and we need those
+for embeddings and attachments. If the user puts only <code>obj</code> into the embeddings
+or attachments argument, <code>prepare_email</code> will attach, for example, <code>obj.png</code>.
+With a list of embeddings or attachments, it will use the names in the list. If
+these aren’t available, or if the object is named <code>.</code> (as would be the case if
+it is coming from a pipe), sensible dummy names are used. File names aren’t
+visible for embeddings, but we do need to ensure that they don’t conflict, or
+else the cid tags will get confused.</p>
+</div>
+<div id="the-ideal-send_email-function" class="section level2">
+<h2>The ideal <code>send_email</code> function</h2>
+<p>As I said, I don’t have any plans to develop this package any further.
+<code>RDCOMOutlook</code> is great for my situation, but it’s not a modern answer. For one
+thing, it only works on Windows, and only with Outlook. DCOM itself is old and
+the documentation is non-existent; there were times here where I was literally
+<em>guessing</em> function names.</p>
+<p>But most of the hard stuff is just juggling list names and image dimensions.
+That doesn’t use DCOM. So why can’t I take what I’ve done and stick in some
+other way of sending emails? So maybe the new function, <code>send_email</code>, will
+have something like a <code>connection</code> argument?</p>
+<p>Without DCOM I do lose that nifty ability to make an email pop up on the
+screen instead of sending it. That’s why I have to drop the <code>prepare_email</code>
+function name. I might also lose the ability to pick up the user’s signature.</p>
+<p>Here’s a possible way to move away from DCOM:</p>
+<ol style="list-style-type: decimal">
+<li>Focus on getting the prototype to work with SMTP. I imagine this covers the
+majority of use cases.</li>
+<li>Bring in compatibility with <code>gmailr</code>.</li>
+<li>Using <code>gmailr</code> as a guide, create <code>outlookr</code> and bring it into the fold.</li>
+</ol>
+<p>I’ve actually had a fair bit of luck accessing the Outlook API using the
+wonderful <code>httr</code> package. I can authenticate and download email attachments.
+But Turning all of that into a proper package with good credential handling
+would be a challenge.</p>
+</div>
+<div id="bonus-goal-searching-emails" class="section level2">
+<h2>Bonus goal: searching emails</h2>
+<p>I built something else for the <code>RDCOMOutlook</code> prototype: the ability to search
+for emails and download attachments. The results are displayed in a nice,
+pretty tibble:</p>
+<pre class="r"><code>RDCOMOutlook::search_emails(&quot;test&quot;) %&gt;% select(subject, received, attachments)</code></pre>
+<pre><code>## # A tibble: 3 x 3
+##   subject                         received            attachments   
+##   &lt;chr&gt;                           &lt;dttm&gt;              &lt;chr&gt;         
+## 1 This is a test email            2018-06-12 16:42:42 &quot;&quot;            
+## 2 Another test                    2018-06-12 17:36:08 &quot;&quot;            
+## 3 A test email with an attachment 2018-06-12 17:36:36 &quot;shiborgi.jpg&quot;</code></pre>
+<p>The problem here is that the <code>AdvancedSearch</code> method of DCOM is
+<em>asynchronous</em>; that is, the search will continue to run in the background
+while R continues with the next statement. There is an <code>AdvancedSearchComplete</code>
+<em>event</em>, I wasn’t able to work out how to handle DCOM events. There is a
+package, called <code>RDCOMEvents</code>, that sounds suitable for this.</p>
+<p>But I was able to download attachments from an Office365 email account using
+the Outlook REST API. I believe that <code>gmailr</code> can do the same. So I can
+probably recreate this without DCOM. This is a stretch goal, and probably a
+distraction, but it does seem like nice functionality to have.</p>
+</div>
+<div id="sources" class="section level2">
+<h2>Sources</h2>
+<p>The header image at the top of this page is modified from an image in the
+<a href="https://www.pexels.com/photo/gray-steel-tubes-586019/">public domain</a>.</p>
+<hr />
+<pre class="r"><code>devtools::session_info()</code></pre>
+<pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
+##  setting  value                       
+##  version  R version 4.1.0 (2021-05-18)
+##  os       macOS Big Sur 11.3          
+##  system   aarch64, darwin20           
+##  ui       X11                         
+##  language (EN)                        
+##  collate  en_AU.UTF-8                 
+##  ctype    en_AU.UTF-8                 
+##  tz       Australia/Melbourne         
+##  date     2021-05-30                  
+## 
+## ─ Packages ───────────────────────────────────────────────────────────────────
+##  package     * version date       lib source        
+##  blogdown      1.3     2021-04-14 [1] CRAN (R 4.1.0)
+##  bookdown      0.22    2021-04-22 [1] CRAN (R 4.1.0)
+##  bslib         0.2.5.1 2021-05-18 [1] CRAN (R 4.1.0)
+##  cachem        1.0.4   2021-02-13 [1] CRAN (R 4.1.0)
+##  callr         3.7.0   2021-04-20 [1] CRAN (R 4.1.0)
+##  cli           2.5.0   2021-04-26 [1] CRAN (R 4.1.0)
+##  crayon        1.4.1   2021-02-08 [1] CRAN (R 4.1.0)
+##  desc          1.3.0   2021-03-05 [1] CRAN (R 4.1.0)
+##  devtools      2.4.0   2021-04-07 [1] CRAN (R 4.1.0)
+##  digest        0.6.27  2020-10-24 [1] CRAN (R 4.1.0)
+##  ellipsis      0.3.2   2021-04-29 [1] CRAN (R 4.1.0)
+##  evaluate      0.14    2019-05-28 [1] CRAN (R 4.1.0)
+##  fansi         0.4.2   2021-01-15 [1] CRAN (R 4.1.0)
+##  fastmap       1.1.0   2021-01-25 [1] CRAN (R 4.1.0)
+##  fs            1.5.0   2020-07-31 [1] CRAN (R 4.1.0)
+##  glue          1.4.2   2020-08-27 [1] CRAN (R 4.1.0)
+##  hms           1.0.0   2021-01-13 [1] CRAN (R 4.1.0)
+##  htmltools     0.5.1.1 2021-01-22 [1] CRAN (R 4.1.0)
+##  jquerylib     0.1.4   2021-04-26 [1] CRAN (R 4.1.0)
+##  jsonlite      1.7.2   2020-12-09 [1] CRAN (R 4.1.0)
+##  knitr         1.33    2021-04-24 [1] CRAN (R 4.1.0)
+##  lifecycle     1.0.0   2021-02-15 [1] CRAN (R 4.1.0)
+##  magrittr      2.0.1   2020-11-17 [1] CRAN (R 4.1.0)
+##  memoise       2.0.0   2021-01-26 [1] CRAN (R 4.1.0)
+##  pillar        1.6.1   2021-05-16 [1] CRAN (R 4.1.0)
+##  pkgbuild      1.2.0   2020-12-15 [1] CRAN (R 4.1.0)
+##  pkgconfig     2.0.3   2019-09-22 [1] CRAN (R 4.1.0)
+##  pkgload       1.2.1   2021-04-06 [1] CRAN (R 4.1.0)
+##  prettyunits   1.1.1   2020-01-24 [1] CRAN (R 4.1.0)
+##  processx      3.5.2   2021-04-30 [1] CRAN (R 4.1.0)
+##  ps            1.6.0   2021-02-28 [1] CRAN (R 4.1.0)
+##  purrr         0.3.4   2020-04-17 [1] CRAN (R 4.1.0)
+##  R6            2.5.0   2020-10-28 [1] CRAN (R 4.1.0)
+##  readr         1.4.0   2020-10-05 [1] CRAN (R 4.1.0)
+##  remotes       2.3.0   2021-04-01 [1] CRAN (R 4.1.0)
+##  rlang         0.4.11  2021-04-30 [1] CRAN (R 4.1.0)
+##  rmarkdown     2.8     2021-05-07 [1] CRAN (R 4.1.0)
+##  rprojroot     2.0.2   2020-11-15 [1] CRAN (R 4.1.0)
+##  rstudioapi    0.13    2020-11-12 [1] CRAN (R 4.1.0)
+##  sass          0.4.0   2021-05-12 [1] CRAN (R 4.1.0)
+##  sessioninfo   1.1.1   2018-11-05 [1] CRAN (R 4.1.0)
+##  stringi       1.6.1   2021-05-10 [1] CRAN (R 4.1.0)
+##  stringr       1.4.0   2019-02-10 [1] CRAN (R 4.1.0)
+##  testthat      3.0.2   2021-02-14 [1] CRAN (R 4.1.0)
+##  tibble        3.1.2   2021-05-16 [1] CRAN (R 4.1.0)
+##  usethis       2.0.1   2021-02-10 [1] CRAN (R 4.1.0)
+##  utf8          1.2.1   2021-03-12 [1] CRAN (R 4.1.0)
+##  vctrs         0.3.8   2021-04-29 [1] CRAN (R 4.1.0)
+##  withr         2.4.2   2021-04-18 [1] CRAN (R 4.1.0)
+##  xfun          0.22    2021-03-11 [1] CRAN (R 4.1.0)
+##  yaml          2.2.1   2020-02-01 [1] CRAN (R 4.1.0)
+## 
+## [1] /Library/Frameworks/R.framework/Versions/4.1-arm64/Resources/library</code></pre>
+</div>

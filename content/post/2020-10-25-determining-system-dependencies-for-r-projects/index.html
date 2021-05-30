@@ -1,0 +1,210 @@
+---
+title: Determining system dependencies for R projects
+author: ~
+date: '2020-10-25'
+slug: determining-system-dependencies-for-r-projects
+tags:
+    - R
+images: ["/img/dependencies.jpg"]
+
+---
+
+<script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
+
+
+<p>Locking down R package dependencies and versions is a solved problem, thanks to the easy-to-use <code>renv</code> package. System dependencies — those Linux packages that need to be installed to make certain R packages work — are a bit harder to manage.</p>
+<div id="option-1-hard-coding" class="section level2">
+<h2>Option 1: Hard-coding</h2>
+<p>The easiest option is to hard-code the system dependencies. I did this recently when <a href="https://github.com/mdneuzerling/plumber-on-k8s/blob/e05ebd4a067ec0fd262ec04681b8ad101391e110/Dockerfile">I was creating a Dockerfile for a very simple Plumber API</a>:</p>
+<pre class="bash"><code>RUN apt-get update -qq &amp;&amp; apt-get -y --no-install-recommends install \
+    make \
+    libsodium-dev \
+    libicu-dev \
+    libcurl4-openssl-dev \
+    libssl-dev</code></pre>
+<p>My Dockerfile used only three R packages and so its system dependencies were not complicated. There are two ways of determining which packages to install:</p>
+<ol style="list-style-type: decimal">
+<li>(The bad way) Try to <code>build</code> the Dockerfile and use the errors to determine which dependencies are missing, or</li>
+<li>(The good way) Use <a href="https://packagemanager.rstudio.com/client/#/">The RStudio Package Manager</a>.</li>
+</ol>
+<p>The RStudio Package Manager (RSPM) has had a huge impact on my R workflow. It just makes life easier. In this case, <a href="https://packagemanager.rstudio.com/client/#/repos/1/packages/plumber">it tells me the system dependencies for each R package, as well as the installation commands</a>. System dependencies vary between Linux distributions and releases, and RSPM takes this into account.</p>
+<p>Hardcoding system dependencies into Dockerfiles or CI/CD pipelines makes sense for small, throwaway projects, but isn’t a great idea for ongoing and dynamic projects. A better option is to automatically determine these dependencies automatically.</p>
+</div>
+<div id="option-2-from-package-descriptions" class="section level2">
+<h2>Option 2: From package DESCRIPTIONs</h2>
+<p>There are some great options for determining system dependencies automatically from package DESCRIPTION files. These files contain lists of dependencies for the package, so all that’s needed is an established repository to translate those R dependencies to system dependencies.</p>
+<p><a href="https://packagemanager.rstudio.com/__api__/swagger/index.html">RSPM has a public API</a>, and that has a few endpoints for querying system dependencies. <a href="https://rdrr.io/cran/remotes/man/system_requirements.html">The <code>remotes</code> package offers the <code>system_requirements</code> function</a>, which queries the RSPM API for the system dependencies of a package. The package can be on CRAN, or it can be a package under local development; in this case, the DESCRIPTION file is used.</p>
+<p>An important use-case for this is in creating continuous integration pipelines for a package in development. Every time the package is updated a fresh environment is used for testing, so system dependencies need to be installed each time. The <a href="https://github.com/r-lib/actions">r-lib actions repository</a> has an example of a <a href="https://github.com/r-lib/actions/blob/673b3c925483f67fa939c31748562af36bb4cde2/examples/check-standard.yaml#L58">standard package check in Github Actions</a> that does this:</p>
+<pre class="bash"><code>- name: Install system dependencies
+  if: runner.os == &#39;Linux&#39;
+  run: |
+    while read -r cmd
+    do
+      eval sudo $cmd
+    done &lt; &lt;(Rscript -e &#39;writeLines(remotes::system_requirements(&quot;ubuntu&quot;, &quot;20.04&quot;))&#39;)</code></pre>
+<p><a href="https://github.com/r-lib/actions/blob/df2ff6518076b804295296769e68d858c38088ea/examples/check-standard.yaml#L54">An earlier version of this workflow</a> used <a href="https://www.google.com/search?channel=fs&amp;client=ubuntu&amp;q=sysreqs+r+package">the <code>sysreqs</code> package</a>, which calls on <a href="https://sysreqs.r-hub.io/">https://sysreqs.r-hub.io/</a> to perform this translation:</p>
+<pre class="bash"><code>- name: Install system dependencies
+  if: runner.os == &#39;Linux&#39;
+  env:
+    RHUB_PLATFORM: linux-x86_64-ubuntu-gcc
+  run: |
+    Rscript -e &quot;remotes::install_github(&#39;r-hub/sysreqs&#39;)&quot;
+    sysreqs=$(Rscript -e &quot;cat(sysreqs::sysreq_commands(&#39;DESCRIPTION&#39;))&quot;)
+    sudo -s eval &quot;$sysreqs&quot;</code></pre>
+<p>Most of the work in this space has been done by Jim Hester, whose contributions to Github Actions for R have made my life much, much easier.</p>
+</div>
+<div id="option-3-from-renv-lock-files" class="section level2">
+<h2>Option 3: From <code>renv</code> lock files</h2>
+<p>While <code>remotes::system_requirements</code> function is great for package development, it doesn’t cover every R project. The emerging standard for managing R package dependencies is <code>renv</code>. Given this, and given <code>renv</code>’s capacity to automatically detect package dependencies, it makes sense to explore linking <code>renv</code> lock files to system dependencies.</p>
+<p>Before I go on, I’ll just say that I would be <em>very surprised</em> if this hasn’t been done before, or someone isn’t already looking at this.</p>
+<p><a href="https://packagemanager.rstudio.com/__api__/swagger/index.html">The RSPM API</a> contains an endpoint for querying system dependencies with a list of packages, rather than a DESCRIPTION file. Here’s an example query:</p>
+<pre><code>http://packagemanager.rstudio.com/__api__/repos/1/sysreqs?all=false&amp;pkgname=plumber&amp;pkgname=rmarkdown&amp;distribution=ubuntu&amp;release=20.04</code></pre>
+<p>Despite what the Swagger page says, the package names need to be specified each with <code>pkgname=</code>, rather than being separated by commas.</p>
+<p>The result is a JSON that needs to be parsed into something usable. <a href="https://github.com/mdneuzerling/getsysreqs">I’ve created a package that does just this</a>. It’s a very low-effort package, so please don’t use it for anything serious. Or better yet, don’t use it at all. But it does show that the RSPM API supports this use-case:</p>
+<pre class="r"><code>library(getsysreqs)
+
+get_sysreqs(
+  c(&quot;plumber&quot;, &quot;rmarkdown&quot;),
+  distribution = &quot;ubuntu&quot;,
+  release = &quot;20.04&quot;
+)</code></pre>
+<pre><code>## [1] &quot;libsodium-dev&quot;        &quot;pandoc&quot;               &quot;libcurl4-openssl-dev&quot;
+## [4] &quot;libssl-dev&quot;           &quot;make&quot;                 &quot;libicu-dev&quot;</code></pre>
+<p>With a little more JSON-parsing, it’s possible to extract the R package dependencies from an <code>renv</code> lock file. Here’s an example from a more complicated project:</p>
+<pre class="r"><code>get_sysreqs(
+  &quot;renv.lock&quot;,
+  distribution = &quot;ubuntu&quot;,
+  release = &quot;20.04&quot;
+)</code></pre>
+<pre><code>##  [1] &quot;libxml2-dev&quot;          &quot;git&quot;                  &quot;make&quot;                
+##  [4] &quot;libglpk-dev&quot;          &quot;libgmp3-dev&quot;          &quot;libgit2-dev&quot;         
+##  [7] &quot;libssh2-1-dev&quot;        &quot;libssl-dev&quot;           &quot;zlib1g-dev&quot;          
+## [10] &quot;pandoc&quot;               &quot;libcurl4-openssl-dev&quot; &quot;libicu-dev&quot;</code></pre>
+<p>And with only a little bit of string manipulation, it’s possible to generate install commands:</p>
+<pre class="r"><code>apt_get_install(
+  &quot;renv.lock&quot;,
+  distribution = &quot;ubuntu&quot;,
+  release = &quot;20.04&quot;
+)</code></pre>
+<pre><code>## [1] &quot;apt-get update -qq &amp;&amp; apt-get -y --no-install-recommends install libxml2-dev git make libglpk-dev libgmp3-dev libgit2-dev libssh2-1-dev libssl-dev zlib1g-dev pandoc libcurl4-openssl-dev libicu-dev&quot;</code></pre>
+<p>This isn’t perfect:</p>
+<ol style="list-style-type: decimal">
+<li>Currently this only accepts CRAN dependencies. The RSPM API returns an error when a non-existent package is in the request. An alternative would be to query every package separately and ignore the errors for non-existent packages, but I’m cautious about querying the API too frequently.</li>
+<li>Prefixing every dependency with <code>apt-get install</code> is naïve. System dependencies may have commands that need to be run before or after installation (Java, always Java). Fortunately, the RSPM API also tracks these.</li>
+<li>Not every Linux distribution uses <code>apt</code>.</li>
+</ol>
+<hr />
+<pre class="r"><code>devtools::session_info()</code></pre>
+<pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
+##  setting  value                       
+##  version  R version 4.1.0 (2021-05-18)
+##  os       macOS Big Sur 11.3          
+##  system   aarch64, darwin20           
+##  ui       X11                         
+##  language (EN)                        
+##  collate  en_AU.UTF-8                 
+##  ctype    en_AU.UTF-8                 
+##  tz       Australia/Melbourne         
+##  date     2021-05-30                  
+## 
+## ─ Packages ───────────────────────────────────────────────────────────────────
+##  package     * version    date       lib
+##  blogdown      1.3        2021-04-14 [1]
+##  bookdown      0.22       2021-04-22 [1]
+##  bslib         0.2.5.1    2021-05-18 [1]
+##  cachem        1.0.4      2021-02-13 [1]
+##  callr         3.7.0      2021-04-20 [1]
+##  cli           2.5.0      2021-04-26 [1]
+##  codetools     0.2-18     2020-11-04 [1]
+##  crayon        1.4.1      2021-02-08 [1]
+##  curl          4.3.1      2021-04-30 [1]
+##  desc          1.3.0      2021-03-05 [1]
+##  devtools      2.4.0      2021-04-07 [1]
+##  digest        0.6.27     2020-10-24 [1]
+##  ellipsis      0.3.2      2021-04-29 [1]
+##  evaluate      0.14       2019-05-28 [1]
+##  fastmap       1.1.0      2021-01-25 [1]
+##  fs            1.5.0      2020-07-31 [1]
+##  getsysreqs  * 0.0.0.9000 2021-05-30 [1]
+##  glue          1.4.2      2020-08-27 [1]
+##  htmltools     0.5.1.1    2021-01-22 [1]
+##  httr          1.4.2      2020-07-20 [1]
+##  jquerylib     0.1.4      2021-04-26 [1]
+##  jsonlite      1.7.2      2020-12-09 [1]
+##  knitr         1.33       2021-04-24 [1]
+##  lifecycle     1.0.0      2021-02-15 [1]
+##  magrittr      2.0.1      2020-11-17 [1]
+##  memoise       2.0.0      2021-01-26 [1]
+##  pkgbuild      1.2.0      2020-12-15 [1]
+##  pkgload       1.2.1      2021-04-06 [1]
+##  prettyunits   1.1.1      2020-01-24 [1]
+##  processx      3.5.2      2021-04-30 [1]
+##  ps            1.6.0      2021-02-28 [1]
+##  purrr         0.3.4      2020-04-17 [1]
+##  R6            2.5.0      2020-10-28 [1]
+##  remotes       2.3.0      2021-04-01 [1]
+##  rlang         0.4.11     2021-04-30 [1]
+##  rmarkdown     2.8        2021-05-07 [1]
+##  rprojroot     2.0.2      2020-11-15 [1]
+##  rstudioapi    0.13       2020-11-12 [1]
+##  sass          0.4.0      2021-05-12 [1]
+##  sessioninfo   1.1.1      2018-11-05 [1]
+##  stringi       1.6.1      2021-05-10 [1]
+##  stringr       1.4.0      2019-02-10 [1]
+##  testthat      3.0.2      2021-02-14 [1]
+##  usethis       2.0.1      2021-02-10 [1]
+##  withr         2.4.2      2021-04-18 [1]
+##  xfun          0.22       2021-03-11 [1]
+##  yaml          2.2.1      2020-02-01 [1]
+##  source                                  
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  Github (mdneuzerling/getsysreqs@395c45a)
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+##  CRAN (R 4.1.0)                          
+## 
+## [1] /Library/Frameworks/R.framework/Versions/4.1-arm64/Resources/library</code></pre>
+<p>The image at the top of this page is in the public domain, <a href="https://www.pexels.com/photo/person-in-black-leather-boots-sitting-on-brown-cardboard-boxes-4553277/">and was downloaded from Pexels</a>.</p>
+</div>

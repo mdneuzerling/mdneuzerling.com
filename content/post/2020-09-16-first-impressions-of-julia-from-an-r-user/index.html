@@ -1,0 +1,430 @@
+---
+title: First Impressions of Julia from an R User
+author: ~
+date: '2020-09-16'
+slug: first-impressions-of-julia-from-an-r-user
+tags:
+    - julia
+images: ["/img/julia.png"]
+
+---
+
+<script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
+
+
+<p>It’s no secret that I love R and begrudgingly use Python. But there’s a another option for data science, and it promises the speed of C with the ease of use of R/Python. That language is Julia, and it’s a <em>delight</em> to use. I took some time to learn the basics, and I’m sharing my impressions here.</p>
+<p><strong>Update 2021-05-30</strong>: Due to issues with Apple Silicon, I’ve hard-coded the Julia output in this post.</p>
+<div id="julia-is-not-the-most-popular-language-in-the-world" class="section level2">
+<h2>Julia is not the most popular language in the world</h2>
+<p>Before I go on, there’s one thing I want to stress here: Julia is not as popular as Python or R for doing stuff with data. It doesn’t have the vast library of packages/modules that the veteran languages have built up over decades.</p>
+<p>If this is a deal-breaker, then don’t worry about Julia. If you want to use the languages with the most packages, or what looks best on your resume, then Python or R are better options. I’m not disparaging you either; these are good reasons.</p>
+<p>But if you — like me — find that writing code to do stuff with data is <em>fun</em>, then it’s well worth checking out Julia. I just wanted to get that common objection out of the way first.</p>
+</div>
+<div id="multiple-dispatch" class="section level2">
+<h2>Multiple dispatch</h2>
+<p>People are often surprised to discover that R uses a lot of object-oriented programming. R objects store their classes as vectors, and can be accessed (and modified) with the <code>class</code> function:</p>
+<pre class="r"><code># R
+a_tibble &lt;- tibble::tibble(x = c(1, 2, 3), y = c(4, 5, 6))
+class(a_tibble)</code></pre>
+<pre><code>## [1] &quot;tbl_df&quot;     &quot;tbl&quot;        &quot;data.frame&quot;</code></pre>
+<p>In R, the main implementation of object-oriented programming is through a system called <em>S3</em>. When I call a <em>generic function</em>, like <code>print</code>, R looks at the class of the first argument to determine which print <em>method</em> to use. If I <code>print</code> a data frame, then <code>print.data.frame</code> is used. If I print a linear model, then <code>print.lm</code> is used. And there are a lot of <code>print</code> methods:</p>
+<pre class="r"><code># R
+sloop::s3_methods_generic(&quot;print&quot;)</code></pre>
+<pre><code>## # A tibble: 322 x 4
+##    generic class       visible source             
+##    &lt;chr&gt;   &lt;chr&gt;       &lt;lgl&gt;   &lt;chr&gt;              
+##  1 print   acf         FALSE   registered S3method
+##  2 print   AES         FALSE   registered S3method
+##  3 print   all_vars    FALSE   registered S3method
+##  4 print   anova       FALSE   registered S3method
+##  5 print   ansi_string FALSE   registered S3method
+##  6 print   ansi_style  FALSE   registered S3method
+##  7 print   any_vars    FALSE   registered S3method
+##  8 print   aov         FALSE   registered S3method
+##  9 print   aovlist     FALSE   registered S3method
+## 10 print   ar          FALSE   registered S3method
+## # … with 312 more rows</code></pre>
+<p>This process of figuring out which method to use is called <em>dispatch</em>. S3 is a <em>single dispatch</em> system: only the classes of the first argument to the function are used to determine which method to call<a href="#fn1" class="footnote-ref" id="fnref1"><sup>1</sup></a>. Julia takes it a step further with <em>multiple dispatch</em>. And it works on <em>types</em>, not classes.</p>
+</div>
+<div id="a-simple-example-of-multiple-dispatch-animals" class="section level2">
+<h2>A simple example of multiple dispatch: animals</h2>
+<p>Here’s a simple example of multiple dispatch<a href="#fn2" class="footnote-ref" id="fnref2"><sup>2</sup></a>. I’ll create an abstract type in Julia, called <code>Animal</code>:</p>
+<pre class="julia"><code># Julia
+abstract type Animal end</code></pre>
+<p>I’ll now create two <em>subtypes</em> of animal: <code>Cat</code> and <code>Dog</code>. These will be each be a <code>struct</code>, which is a type composed of other types. In this case, each of the two new types will have a <code>Name</code> of type <code>String</code>, and Age of type <code>Int</code>:</p>
+<pre class="julia"><code>struct Cat &lt;: Animal
+    Name::String 
+    Age::Int
+end
+
+struct Dog &lt;: Animal
+    Name::String 
+    Age::Int
+end</code></pre>
+<p>Now I’ll define an <code>interaction</code> function which will output a string describing the interaction of two animals. Actually, I’ll define 4 <em>methods</em> for this function. The method that’s called will depend upon the types of <em>both</em> arguments:</p>
+<pre class="julia"><code>interaction(x::Cat, y::Cat) = &quot;meow&quot;
+
+
+#&gt; interaction (generic function with 1 method)
+
+interaction(x::Dog, y::Dog) = &quot;sniff&quot;
+
+
+#&gt; interaction (generic function with 2 methods)
+
+interaction(x::Cat, y::Dog) = &quot;growl&quot;
+
+
+#&gt; interaction (generic function with 3 methods)
+
+interaction(x::Dog, y::Cat) = interaction(y, x)
+
+
+#&gt; interaction (generic function with 4 methods)</code></pre>
+<p>In any other language, it would look like I’m defining a function and then overwriting it three times. But with Julia, functions are <em>unique up to name and type signature</em>. <code>interaction(x::Cat, y::Cat)</code> has a type signature of <code>(Cat, Cat)</code> and <code>interaction(x::Dog, y::Dog)</code> has a type signature of <code>(Dog, Dog)</code>. So instead of overwriting the function I simply add a new <em>generic</em> each time.</p>
+<p>I’ll define some cats and dogs based on those I know around my neighbourhood, such as the friendly golden retriever <em>Hudson</em> who always says good morning to me, or the stylish mini-whippet <em>Phoebe</em> who has a new outfit every time I see her. The semicolon here tells Julia to suppress the output:</p>
+<pre class="julia"><code>luna = Cat(&quot;Luna&quot;, 1);
+pip = Cat(&quot;Pip&quot;, 5);
+hudson = Dog(&quot;Hudson&quot;, 4);
+phoebe = Dog(&quot;Phoebe&quot;, 1);</code></pre>
+<p>And now lets see how these animals would interact:</p>
+<pre class="julia"><code>interaction(luna, pip)
+
+
+#&gt; &quot;meow&quot;
+
+interaction(pip, luna)
+
+
+#&gt; &quot;meow&quot;
+
+interaction(hudson, phoebe)
+
+
+#&gt; &quot;sniff&quot;
+
+interaction(luna, phoebe)
+
+
+#&gt; &quot;growl&quot;</code></pre>
+<p>Just as expected! These animals have different interactions based on their types.</p>
+<p>Of course, I could accomplish the same thing with single dispatch and some if-else statements. But if I do that and I later want to extend the interactions to cover other animals, I have to go back and change those if-else statements. With Julia, it’s just a matter of defining new functions.</p>
+</div>
+<div id="going-up-the-type-hierarchy" class="section level2">
+<h2>Going up the type hierarchy</h2>
+<p>Earlier I defined an <code>Animal</code> type, which is a supertype of <code>Cat</code> and <code>Dog</code>. Julia will always use <em>the most specific method it can find</em>. If one doesn’t exist for the exact types, then it will consider supertypes. I can demonstrate this by creating a generic with type signature <code>(Animal, Animal)</code>, to be used when no more specific function can be found:</p>
+<pre class="julia"><code>struct Gazelle &lt;: Animal
+    Name::String 
+    Age::Int
+end;
+
+bob = Gazelle(&quot;Bob&quot;, 2);
+interaction(x::Animal, y::Animal) = &quot;flee&quot;;
+interaction(hudson, bob)
+
+
+#&gt; &quot;flee&quot;</code></pre>
+<p>I haven’t defined a method like <code>interaction(x::Dog, y::Gazelle)</code>, so Julia goes up the type hierarchy to find <code>interaction(x::Animal, y::Animal)</code> instead.</p>
+<p>Multiple dispatch is a core concept of Julia, and one of the main reasons that it’s so much faster than R or Python. Julia can compile fast functions for each type signature. And there are <strong>a lot</strong> of type signatures to consider. On my machine I count 184 methods for the <code>+</code> operator!</p>
+</div>
+<div id="the-power-of-macros" class="section level2">
+<h2>The power of macros</h2>
+<p>I’ve become so used to R’s metaprogramming features that I think I would struggle with any language that doesn’t let me treat code as data to be manipulated. Julia delivers in the form of macros.</p>
+<p>I’ll give an example. In most languages, the <code>or</code> logical operator is short-circuited: If the first argument is true, then the second argument isn’t evaluated. This behaviour exists in R with its <code>||</code> short-circuited operator. If the first argument to <code>||</code> is <code>TRUE</code>, then R doesn’t evaluate the second argument. I can even make the second argument something that throws an error and R won’t complain, as long as the first argument is <code>TRUE</code>:</p>
+<pre class="r"><code># R
+stop(&quot;Oh no!&quot;) || TRUE</code></pre>
+<pre><code>## Error in eval(expr, envir, enclos): Oh no!</code></pre>
+<pre class="r"><code>TRUE || stop(&quot;Oh no!&quot;)</code></pre>
+<pre><code>## [1] TRUE</code></pre>
+<p>Suppose I wanted to create a <em>backwards-or</em> function, <code>bor</code>, that does the same thing but evaluates the second argument first. That is, I want a function <code>bor(x, y)</code> that acts just like <code>||</code>, but doesn’t evaluate <code>x</code> if <code>y</code> is <code>TRUE</code>. This is pretty easy in R, and I don’t even have to take advantage of metaprogramming, since R is lazily-evaluated:</p>
+<pre class="r"><code># R
+bor &lt;- function(x, y) y || x
+
+bor(TRUE, stop(&quot;Oh no!&quot;))</code></pre>
+<pre><code>## Error in bor(TRUE, stop(&quot;Oh no!&quot;)): Oh no!</code></pre>
+<pre class="r"><code>bor(stop(&quot;Oh no!&quot;), TRUE)</code></pre>
+<pre><code>## [1] TRUE</code></pre>
+<p>Julia code is evaluated eagerly, so this won’t work:</p>
+<pre class="julia"><code># Julia
+bor(x, y) = y || x
+bor(error(&quot;Oh no!&quot;), true)
+
+# ERROR: Oh no!
+# Stacktrace:
+#  [1] error(::String) at ./error.jl:33
+#  [2] top-level scope at REPL[38]:1
+#  [3] include_string(::Function, ::Module, ::String, ::String) at ./loading.jl:1088</code></pre>
+<p>A macro, however, lets me move code around <em>before it is evaluated</em>. Macros start with the <code>@</code> symbol:</p>
+<pre class="julia"><code>macro bor(a, b) 
+    return :($b || $a)
+end;
+@bor(error(&quot;Oh no!&quot;), true)
+
+
+#&gt; true</code></pre>
+<p>The <code>:</code> and <code>$</code> symbols are the metaprogramming power here. The <code>:</code> prefix converts to a symbol or expression, whereas <code>$</code> evaluates or <em>interpolates</em> the expression. This is somewhat analogous to base R’s <code>quote</code> and <code>eval</code> functions.</p>
+<p>These two symbols can even be combined to perform what in R is sometimes called <em>quasiquotation</em>, where some things are quoted but others are explicitly evaluated:</p>
+<pre class="julia"><code>a = 1;
+:($a + b)
+
+
+#&gt; :(1 + b)</code></pre>
+</div>
+<div id="reading-in-csv-data" class="section level2">
+<h2>Reading in CSV data</h2>
+<p>Now that I’ve laid down some core concepts of Julia, I’ll share some of my experiences with using the language for the first time.</p>
+<p>The first thing that impressed me was that Julia comes with its own package-management system: a package called <code>Pkg</code>. I tried to load the <code>DataFrames</code> package when it wasn’t installed and Julia gave me the explicit command for installing it. Excellent!</p>
+<p>Reading CSVs into a data frame works exactly like you would expect. It’s pretty darn fast, though; I was able to load in <a href="https://www.kaggle.com/stackoverflow/stacksample">a 2GB CSV of StackExchange data</a> in under 5 seconds, and my machine isn’t very powerful.</p>
+<pre class="julia"><code>using DataFrames
+using CSV
+
+questions = CSV.read(&quot;Questions.csv&quot;)
+
+#&gt; 1264216×7 DataFrame. Omitted printing of 4 columns
+#&gt; │ Row     │ Id       │ OwnerUserId │ CreationDate         │
+#&gt; │         │ Int64    │ String      │ String               │
+#&gt; ├─────────┼──────────┼─────────────┼──────────────────────┤
+#&gt; │ 1       │ 80       │ 26          │ 2008-08-01T13:57:07Z │
+#&gt; │ 2       │ 90       │ 58          │ 2008-08-01T14:41:24Z │
+#&gt; │ 3       │ 120      │ 83          │ 2008-08-01T15:50:08Z │
+#&gt; │ 4       │ 180      │ 2089740     │ 2008-08-01T18:42:19Z │
+#&gt; │ 5       │ 260      │ 91          │ 2008-08-01T23:22:08Z │
+#&gt; │ 6       │ 330      │ 63          │ 2008-08-02T02:51:36Z │
+#&gt; │ 7       │ 470      │ 71          │ 2008-08-02T15:11:47Z │
+#&gt; ⋮
+#&gt; │ 1264209 │ 40143150 │ 5496690     │ 2016-10-19T23:31:41Z │
+#&gt; │ 1264210 │ 40143170 │ 2010246     │ 2016-10-19T23:33:42Z │
+#&gt; │ 1264211 │ 40143190 │ 333403      │ 2016-10-19T23:36:01Z │
+#&gt; │ 1264212 │ 40143210 │ 5610777     │ 2016-10-19T23:38:01Z │
+#&gt; │ 1264213 │ 40143300 │ 3791161     │ 2016-10-19T23:48:09Z │
+#&gt; │ 1264214 │ 40143340 │ 7028647     │ 2016-10-19T23:52:50Z │
+#&gt; │ 1264215 │ 40143360 │ 871677      │ 2016-10-19T23:55:24Z │
+#&gt; │ 1264216 │ 40143380 │ 6823982     │ 2016-10-19T23:57:31Z │</code></pre>
+<p>I like how data frames print in Julia, with the type below the column name. Something that’s missing here is a list of columns which have been omitted from printing, similar to the behaviour of the <code>tibble</code> package in R. And the data frame truncation is a little aggressive; sometimes columns are not printed even though there’s room.</p>
+<p>The <code>CSV.read</code> function uses multiple threads by default. I couldn’t get this to work on my machine, and I had to restrict it to one thread. <a href="https://github.com/JuliaData/CSV.jl/issues/721">I raised an issue on the GitHub page</a>, and a maintainer came along to explain what was going on and implement a fix! What more can you ask for?</p>
+</div>
+<div id="data-frames" class="section level2">
+<h2>Data frames</h2>
+<p>Basic data frame functions are very similar to those in R:</p>
+<pre class="julia"><code>nrow(questions)
+
+
+#&gt; 1264216
+
+ncol(questions)
+
+
+#&gt; 7
+
+head(questions)
+
+
+#&gt; 6×7 DataFrame. Omitted printing of 3 columns
+#&gt; │ Row │ Id    │ OwnerUserId │ CreationDate         │ ClosedDate           │
+#&gt; │     │ Int64 │ String      │ String               │ String               │
+#&gt; ├─────┼───────┼─────────────┼──────────────────────┼──────────────────────┤
+#&gt; │ 1   │ 80    │ 26          │ 2008-08-01T13:57:07Z │ NA                   │
+#&gt; │ 2   │ 90    │ 58          │ 2008-08-01T14:41:24Z │ 2012-12-26T03:45:49Z │
+#&gt; │ 3   │ 120   │ 83          │ 2008-08-01T15:50:08Z │ NA                   │
+#&gt; │ 4   │ 180   │ 2089740     │ 2008-08-01T18:42:19Z │ NA                   │
+#&gt; │ 5   │ 260   │ 91          │ 2008-08-01T23:22:08Z │ NA                   │
+#&gt; │ 6   │ 330   │ 63          │ 2008-08-02T02:51:36Z │ NA                   │</code></pre>
+<p>The <code>describe</code> function, analogous to R’s <code>summary</code> function`, is also quite nice. It presents a bit more information than the R equivalent, and it returns another data frame:</p>
+<pre class="julia"><code>describe(questions)
+
+
+#&gt; 7×8 DataFrame. Omitted printing of 6 columns
+#&gt; │ Row │ variable     │ mean      │
+#&gt; │     │ Symbol       │ Union…    │
+#&gt; ├─────┼──────────────┼───────────┤
+#&gt; │ 1   │ Id           │ 2.13275e7 │
+#&gt; │ 2   │ OwnerUserId  │           │
+#&gt; │ 3   │ CreationDate │           │
+#&gt; │ 4   │ ClosedDate   │           │
+#&gt; │ 5   │ Score        │ 1.78154   │
+#&gt; │ 6   │ Title        │           │
+#&gt; │ 7   │ Body         │           │</code></pre>
+<p>And I can retrieve an individual column (as an array) with either <code>questions.Score</code> or <code>questions["Score"]</code>.</p>
+</div>
+<div id="piping" class="section level2">
+<h2>Piping</h2>
+<p>Julia supports piping. Thank goodness, too, because the <code>tidyverse</code> has spoilt me.</p>
+<p>There’s a native pipe <code>|&gt;</code> which supposedly puts the value on the left as the first argument to the function on the right, but I found it a bit finnicky. The <code>Pipe</code> package improves this substantially by allowing the use of a <code>_</code> placeholder, for example, <code>@pipe 4 |&gt; sqrt(_)</code>. This also opens up the possibility of piping into an argument other than the first. The only downside here is that a chain of piped functions must begin with the <code>@pipe</code> macro.</p>
+<p>It would be neat if this <code>@pipe</code> macro were incorporated into base Julia, but on more than one occasion I’ve seen serious discussions in Julia for removing the base <code>|&gt;</code> operator altogether. I hope that it stays, because a chain of piped functions is a beautiful sight.</p>
+</div>
+<div id="data-manipulation" class="section level2">
+<h2>Data manipulation</h2>
+<p>I had a bit of trouble with <code>DataFrames</code> syntax. The easiest way I could find to manipulate data was to modify-in-place with a series of reassignments. I’ll give an example. My <code>questions</code> data frame has a <code>Score</code> column. Suppose I want to scale it by 100, and then select all scores above 50 (this is some fairly arbitrary data manipulation). I then want to <code>describe</code> the data:</p>
+<pre class="julia"><code>questions2 = copy(questions);
+questions2.Score = questions2.Score * 100;
+questions2 = questions2[questions2.Score .&gt; 50, :];
+describe(questions2)
+
+
+#&gt; 7×8 DataFrame. Omitted printing of 6 columns
+#&gt; │ Row │ variable     │ mean      │
+#&gt; │     │ Symbol       │ Union…    │
+#&gt; ├─────┼──────────────┼───────────┤
+#&gt; │ 1   │ Id           │ 1.84611e7 │
+#&gt; │ 2   │ OwnerUserId  │           │
+#&gt; │ 3   │ CreationDate │           │
+#&gt; │ 4   │ ClosedDate   │           │
+#&gt; │ 5   │ Score        │ 403.745   │
+#&gt; │ 6   │ Title        │           │
+#&gt; │ 7   │ Body         │           │</code></pre>
+<p>I had a much easier time with the <code>DataFramesMeta</code> package. This provides is an excellent, pipe-friendly package that implements some <code>dplyr</code>-like functionality, using macros:</p>
+<pre class="julia"><code>using Pipe
+using DataFramesMeta
+
+@pipe questions |&gt; 
+  @transform(_, Score = 100 * :Score) |&gt;
+  @where(_, :Score .&gt; 50) |&gt;
+  describe(_)
+
+
+#&gt; 7×8 DataFrame. Omitted printing of 6 columns
+#&gt; │ Row │ variable     │ mean      │
+#&gt; │     │ Symbol       │ Union…    │
+#&gt; ├─────┼──────────────┼───────────┤
+#&gt; │ 1   │ Id           │ 1.84611e7 │
+#&gt; │ 2   │ OwnerUserId  │           │
+#&gt; │ 3   │ CreationDate │           │
+#&gt; │ 4   │ ClosedDate   │           │
+#&gt; │ 5   │ Score        │ 403.745   │
+#&gt; │ 6   │ Title        │           │
+#&gt; │ 7   │ Body         │           │</code></pre>
+</div>
+<div id="syntactic-conventions" class="section level2">
+<h2>Syntactic conventions</h2>
+<p>In the above chain, I used <code>.&gt;</code> to filter for values greater than 50. Julia functions and operators implement some very handy syntactic conventions that make life easier, and this is one of them. Vectorised operations are prefixed (or sometimes suffixed) with a dot:</p>
+<pre class="julia"><code>x = [&quot;a&quot;, &quot;b&quot;, &quot;c&quot;]; y = [&quot;a&quot;, &quot;e&quot;, &quot;c&quot;];
+
+x == y
+
+
+#&gt; false
+
+x .== y
+
+
+#&gt; 3-element BitArray{1}:
+#&gt;  1
+#&gt;  0
+#&gt;  1</code></pre>
+<p>(2020-09-16 correction: <a href="https://twitter.com/AriKatz20/status/1306018515426652162">Ari Katz</a> points out that the dot is not a convention but an actual feature of the language that vectorises operators and functions in a fast and memory-efficient way. <a href="https://julialang.org/blog/2017/01/moredots/">See this post for more details</a>.)</p>
+<p>Another convention is that functions that modify in place use an exclamation mark. For example, <code>df = sort(df)</code> is equivalent to <code>sort!(df)</code>. This often trips me up in Python, so I felt genuine relief to find that in Julia I don’t have to guess whether or not a function will modify an argument in-place.</p>
+</div>
+<div id="the-real-killer-feature-of-julia" class="section level2">
+<h2>The real killer feature of Julia</h2>
+<p>I’ve glossed over subjects like speed and compilation because these are areas which I’m not confident discussing. The rough idea is that Julia is <em>fast</em>, and the compiled code is often very similar to that of C. But a really powerful consequence of this is that <em>a user doesn’t need to learn another language to become a contributor</em>.</p>
+<p>If I want to write a new package/module for R/Python, and my use-case requires speedy code, then I’m pretty much obliged to drop down to C/C++. I have the original learning curve for the language I actually want to use, followed by a second learning curve for the lower language. With Julia it’s just… Julia. All Julia. <a href="https://fluxml.ai/">This means that you can have a machine learning library that’s 100% Julia code</a>.</p>
+<p>Whenever I read the source code of an R/Python package and I see a reference to a file that ends with “.c” or “.h” I panic a little. Julia’s killer feature is removing that panic moment. <em>Knowing Julia is enough to use Julia</em>.</p>
+</div>
+<div id="just-give-this-language-a-go" class="section level1">
+<h1>Just give this language a go</h1>
+<hr />
+<pre class="r"><code>devtools::session_info()</code></pre>
+<pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
+##  setting  value                       
+##  version  R version 4.1.0 (2021-05-18)
+##  os       macOS Big Sur 11.3          
+##  system   aarch64, darwin20           
+##  ui       X11                         
+##  language (EN)                        
+##  collate  en_AU.UTF-8                 
+##  ctype    en_AU.UTF-8                 
+##  tz       Australia/Melbourne         
+##  date     2021-05-30                  
+## 
+## ─ Packages ───────────────────────────────────────────────────────────────────
+##  package     * version date       lib source        
+##  assertthat    0.2.1   2019-03-21 [1] CRAN (R 4.1.0)
+##  backports     1.2.1   2020-12-09 [1] CRAN (R 4.1.0)
+##  blogdown      1.3     2021-04-14 [1] CRAN (R 4.1.0)
+##  bookdown      0.22    2021-04-22 [1] CRAN (R 4.1.0)
+##  broom         0.7.6   2021-04-05 [1] CRAN (R 4.1.0)
+##  bslib         0.2.5.1 2021-05-18 [1] CRAN (R 4.1.0)
+##  cachem        1.0.4   2021-02-13 [1] CRAN (R 4.1.0)
+##  callr         3.7.0   2021-04-20 [1] CRAN (R 4.1.0)
+##  cellranger    1.1.0   2016-07-27 [1] CRAN (R 4.1.0)
+##  cli           2.5.0   2021-04-26 [1] CRAN (R 4.1.0)
+##  colorspace    2.0-1   2021-05-04 [1] CRAN (R 4.1.0)
+##  crayon        1.4.1   2021-02-08 [1] CRAN (R 4.1.0)
+##  DBI           1.1.1   2021-01-15 [1] CRAN (R 4.1.0)
+##  dbplyr        2.1.1   2021-04-06 [1] CRAN (R 4.1.0)
+##  desc          1.3.0   2021-03-05 [1] CRAN (R 4.1.0)
+##  devtools      2.4.0   2021-04-07 [1] CRAN (R 4.1.0)
+##  digest        0.6.27  2020-10-24 [1] CRAN (R 4.1.0)
+##  dplyr       * 1.0.5   2021-03-05 [1] CRAN (R 4.1.0)
+##  ellipsis      0.3.2   2021-04-29 [1] CRAN (R 4.1.0)
+##  evaluate      0.14    2019-05-28 [1] CRAN (R 4.1.0)
+##  fansi         0.4.2   2021-01-15 [1] CRAN (R 4.1.0)
+##  fastmap       1.1.0   2021-01-25 [1] CRAN (R 4.1.0)
+##  forcats     * 0.5.1   2021-01-27 [1] CRAN (R 4.1.0)
+##  fs            1.5.0   2020-07-31 [1] CRAN (R 4.1.0)
+##  generics      0.1.0   2020-10-31 [1] CRAN (R 4.1.0)
+##  ggplot2     * 3.3.3   2020-12-30 [1] CRAN (R 4.1.0)
+##  glue          1.4.2   2020-08-27 [1] CRAN (R 4.1.0)
+##  gtable        0.3.0   2019-03-25 [1] CRAN (R 4.1.0)
+##  haven         2.4.1   2021-04-23 [1] CRAN (R 4.1.0)
+##  hms           1.0.0   2021-01-13 [1] CRAN (R 4.1.0)
+##  htmltools     0.5.1.1 2021-01-22 [1] CRAN (R 4.1.0)
+##  httr          1.4.2   2020-07-20 [1] CRAN (R 4.1.0)
+##  jquerylib     0.1.4   2021-04-26 [1] CRAN (R 4.1.0)
+##  jsonlite      1.7.2   2020-12-09 [1] CRAN (R 4.1.0)
+##  JuliaCall     0.17.4  2021-05-16 [1] CRAN (R 4.1.0)
+##  knitr         1.33    2021-04-24 [1] CRAN (R 4.1.0)
+##  lifecycle     1.0.0   2021-02-15 [1] CRAN (R 4.1.0)
+##  lubridate     1.7.10  2021-02-26 [1] CRAN (R 4.1.0)
+##  magrittr      2.0.1   2020-11-17 [1] CRAN (R 4.1.0)
+##  memoise       2.0.0   2021-01-26 [1] CRAN (R 4.1.0)
+##  modelr        0.1.8   2020-05-19 [1] CRAN (R 4.1.0)
+##  munsell       0.5.0   2018-06-12 [1] CRAN (R 4.1.0)
+##  pillar        1.6.1   2021-05-16 [1] CRAN (R 4.1.0)
+##  pkgbuild      1.2.0   2020-12-15 [1] CRAN (R 4.1.0)
+##  pkgconfig     2.0.3   2019-09-22 [1] CRAN (R 4.1.0)
+##  pkgload       1.2.1   2021-04-06 [1] CRAN (R 4.1.0)
+##  prettyunits   1.1.1   2020-01-24 [1] CRAN (R 4.1.0)
+##  processx      3.5.2   2021-04-30 [1] CRAN (R 4.1.0)
+##  ps            1.6.0   2021-02-28 [1] CRAN (R 4.1.0)
+##  purrr       * 0.3.4   2020-04-17 [1] CRAN (R 4.1.0)
+##  R6            2.5.0   2020-10-28 [1] CRAN (R 4.1.0)
+##  Rcpp          1.0.6   2021-01-15 [1] CRAN (R 4.1.0)
+##  readr       * 1.4.0   2020-10-05 [1] CRAN (R 4.1.0)
+##  readxl        1.3.1   2019-03-13 [1] CRAN (R 4.1.0)
+##  remotes       2.3.0   2021-04-01 [1] CRAN (R 4.1.0)
+##  reprex        2.0.0   2021-04-02 [1] CRAN (R 4.1.0)
+##  rlang         0.4.11  2021-04-30 [1] CRAN (R 4.1.0)
+##  rmarkdown     2.8     2021-05-07 [1] CRAN (R 4.1.0)
+##  rprojroot     2.0.2   2020-11-15 [1] CRAN (R 4.1.0)
+##  rstudioapi    0.13    2020-11-12 [1] CRAN (R 4.1.0)
+##  rvest         1.0.0   2021-03-09 [1] CRAN (R 4.1.0)
+##  sass          0.4.0   2021-05-12 [1] CRAN (R 4.1.0)
+##  scales        1.1.1   2020-05-11 [1] CRAN (R 4.1.0)
+##  sessioninfo   1.1.1   2018-11-05 [1] CRAN (R 4.1.0)
+##  sloop         1.0.1   2019-02-17 [1] CRAN (R 4.1.0)
+##  stringi       1.6.1   2021-05-10 [1] CRAN (R 4.1.0)
+##  stringr     * 1.4.0   2019-02-10 [1] CRAN (R 4.1.0)
+##  testthat      3.0.2   2021-02-14 [1] CRAN (R 4.1.0)
+##  tibble      * 3.1.2   2021-05-16 [1] CRAN (R 4.1.0)
+##  tidyr       * 1.1.3   2021-03-03 [1] CRAN (R 4.1.0)
+##  tidyselect    1.1.1   2021-04-30 [1] CRAN (R 4.1.0)
+##  tidyverse   * 1.3.1   2021-04-15 [1] CRAN (R 4.1.0)
+##  usethis       2.0.1   2021-02-10 [1] CRAN (R 4.1.0)
+##  utf8          1.2.1   2021-03-12 [1] CRAN (R 4.1.0)
+##  vctrs         0.3.8   2021-04-29 [1] CRAN (R 4.1.0)
+##  withr         2.4.2   2021-04-18 [1] CRAN (R 4.1.0)
+##  xfun          0.22    2021-03-11 [1] CRAN (R 4.1.0)
+##  xml2          1.3.2   2020-04-23 [1] CRAN (R 4.1.0)
+##  yaml          2.2.1   2020-02-01 [1] CRAN (R 4.1.0)
+## 
+## [1] /Library/Frameworks/R.framework/Versions/4.1-arm64/Resources/library</code></pre>
+<p>The Julia logo at the top of this image is the intellectual property of Stefan Karpinski, <a href="https://discourse.julialang.org/t/trademark-guidelines-fair-use-policy-for-julia-name-logo/3404/4">who allows its use for non-commercial purposes</a>.</p>
+</div>
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn1"><p>The S4 system is capable of multiple dispatch.<a href="#fnref1" class="footnote-back">↩︎</a></p></li>
+<li id="fn2"><p>This example was discussed in a StackOverflow post that I can no longer find.<a href="#fnref2" class="footnote-back">↩︎</a></p></li>
+</ol>
+</div>

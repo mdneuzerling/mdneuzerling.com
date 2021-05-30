@@ -6,7 +6,7 @@ slug: machine-learning-workflows-with-julia
 tags:
     - julia
 images: ["/img/pokemon-total-stats.png"]
-output: hugodown::md_document
+
 ---
     
 ```{r setup, include=FALSE, eval=FALSE}
@@ -59,7 +59,7 @@ My data set consists of [800 Pokémon](https://www.kaggle.com/rounakbanik/pokemo
 
 A natural candidate for a model, then, is whether or not we can predict a Pokémon's first type from its stats. Let's start by loading the data, along with the Julia packages we'll need along the way:
 
-```{julia julia-package-load, eval=TRUE}
+```{julia julia-package-load, eval=FALSE}
 using DataFrames
 using DataFramesMeta
 using Chain
@@ -81,7 +81,7 @@ Gadfly.push_theme(
 )
 ```
 
-```{julia load-data, eval=TRUE}
+```{julia load-data, eval=FALSE}
 pokemon = CSV.read("data/pokemon.csv", DataFrame)
 ```
 

@@ -8,7 +8,7 @@ categories: []
 tags: [R, conference]
 images: ["/img/useR/tutorial_two.png"]
 featuredalt: "useR2018 Tutorial Two"
-output: hugodown::md_document
+
 ---
 
 These are my notes for the tutorial given by 
@@ -104,7 +104,7 @@ data for testing.
 ```{r ames_split, message = FALSE, warning = FALSE, cache = FALSE}
 library(rsample)
 set.seed(4595)
-data_split <- initial_split(ames, strata = "Sale_Price", p = 0.75)
+data_split <- initial_split(ames, strata = "Sale_Price", prop = 0.75)
 ames_train <- training(data_split)
 ames_test <- testing(data_split)
 ```

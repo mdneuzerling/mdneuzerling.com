@@ -7,7 +7,7 @@ tags:
     - R
 images: ["/img/drake-model-execution-plan.png"]
 featuredalt: "A drake model execution plan"
-output: hugodown::md_document
+
 ---
 
 Drake is my new favourite R package.

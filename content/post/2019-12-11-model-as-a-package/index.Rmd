@@ -7,7 +7,7 @@ tags:
     - R
 images: ["/img/ModelAsAPackage.png"]
 featuredalt: "Word cloud of review text"
-output: hugodown::md_document
+
 ---
 
 There’s a concept in R of an [analysis as a package](https://www.r-bloggers.com/creating-an-analysis-as-a-package-and-vignette), in which everything you need for your data analysis is contained within a custom package. When you install the package and build the vignettes, the data analysis is performed and results saved as a pretty HTML or PDF file, generated with R Markdown. I wanted to extend this concept to a machine learning **model as a package**.

@@ -9,7 +9,7 @@ tags:
   - scraping
 images: ["/img/dice.jpg"]
 featuredalt: "dice"
-output: hugodown::md_document
+
 ---
 
 ```{r setup, include=FALSE}

@@ -9,7 +9,7 @@ tags:
   - maths
 images: ["/img/katherine_crochet.jpg"]
 featuredalt: "Dr. Katherine Seaton's crocheted hyperbolic surfaces"
-output: hugodown::md_document
+
 ---
 
 Last year an honours student noticed something missing in mathematics and statistics at La Trobe University. She saw that there was no society at the university to cultivate an interest in mathematics. There were no social events to help the undergraduate students get to know one another. And there was very little in the way of extracurricular lectures for students without several years of mathematical study already under their belt. So she started the Mathematics and Statistics Society at La Trobe University.

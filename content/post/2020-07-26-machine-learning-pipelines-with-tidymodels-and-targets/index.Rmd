@@ -6,7 +6,7 @@ slug: machine-learning-pipelines-with-tidymodels-and-targets
 tags:
     - R
 images: ["/img/coffee-pipeline.png"]
-output: hugodown::md_document
+
 ---
 
 ```{r setup, include=FALSE, cache=FALSE}
@@ -57,7 +57,7 @@ coffee %>%
   ggtitle("Coffee quality by country of origin") +
   xlab("cupper points") +
   ylab(NULL) +
-  theme_minimal(base_size = 16, base_family = "Montserrat") +
+  theme_minimal(base_size = 16) +
   theme(legend.position = "none")
 ```
 

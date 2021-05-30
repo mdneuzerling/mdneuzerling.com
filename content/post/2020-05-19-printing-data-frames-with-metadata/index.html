@@ -1,0 +1,134 @@
+---
+title: Printing data frames with metadata
+author: ~
+date: '2020-05-19'
+slug: printing-data-frames-with-metadata
+tags:
+    - R
+images: ["/img/flinders-departures.png"]
+featuredalt: "A tibble of train departures from Flinders Street station"
+
+---
+
+<script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
+
+
+<p>I’m creating an R API wrapper around my state’s public transport service. To make life easier for the users, the responses from the API calls are parsed and returned as tibbles/data frames. To make life easier for me, I need to keep track of the API call behind each tibble. I do this by using the <code>tibble::new_tibble()</code> function to attach metadata to the tibble as attributes, and creating a custom <code>print</code> method to make the metadata visible.</p>
+<p>First, the raw response from the API call is structured as a list:</p>
+<pre class="r"><code>response &lt;- list(
+    request = request_url_without_auth,
+    retrieved = format(
+      Sys.time(),
+      format = &quot;%Y-%m-%d %H:%M:%OS %Z&quot;,
+      tz = &quot;Australia/Melbourne&quot;
+    ),
+    status_code = status_code,
+    content = content
+)</code></pre>
+<p>Some other function will take the content in this list, process it, and create a <code>parsed</code> tibble. We hand this off to the <code>tibble::new_tibble()</code> function. Along with the new class name — “ptvapi” — we also attach the <code>response</code> metadata as attributes to the new tibble.</p>
+<pre class="r"><code>tibble::new_tibble(
+    parsed,
+    nrow = nrow(parsed),
+    class = &quot;ptvapi&quot;,
+    request = response$request,
+    retrieved = response$retrieved,
+    status_code = response$status_code,
+    content = response$content
+  )</code></pre>
+<p>Let’s say we have a tibble <code>flinders_departures</code> created through this process. <code>flinders_departures</code> will have the following classes, in order: “ptvapi”, “tbl_df”, “tbl”, and “data.frame”.</p>
+<p>For those who are unfamiliar to S3, some functions in R — like <code>print()</code>, <code>summary()</code> and <code>predict()</code> — are <em>generics</em>. When we call a generic, R will look through the classes of the argument to find the right <em>method</em> to call. When we call <code>print(flinders_departures)</code> (or, equivalently, enter <code>flinders_departures</code> at the console) R will first look for the <code>print.ptvapi()</code> method. If it can’t find that, it will move on to <code>print.tbl_df()</code>, and so on, until it tries <code>print.default()</code>.</p>
+<p>If I were to let R go through this method I would print <code>flinders_departures</code> without printing the metadata. So I created a simple way of printing out those attributes:</p>
+<pre class="r"><code>print.ptvapi &lt;- function(x) {
+  if (!is.null(attr(x, &quot;request&quot;))) {
+    cat(&quot;Request:&quot;, attr(x, &quot;request&quot;), &quot;\n&quot;)
+  }
+  if (!is.null(attr(x, &quot;retrieved&quot;))) {
+    cat(&quot;Retrieved:&quot;, attr(x, &quot;retrieved&quot;), &quot;\n&quot;)
+  }
+  if (!is.null(attr(x, &quot;status_code&quot;))) {
+    cat(&quot;Status code:&quot;, attr(x, &quot;status_code&quot;), &quot;\n&quot;)
+  }
+  NextMethod()
+}</code></pre>
+<p>This method will print out the attributes if they exist. <code>NextMethod()</code> will then make R go down the class chain, until it prints like a regular tibble. This is great for debugging. The response of the API call is (more or less) determined by the three attributes I specifically print. So it makes life much easier for me to be able relate the parsed tibble to the API response.</p>
+<pre><code>&gt; flinders_departures
+Request: http://timetableapi.ptv.vic.gov.au/v3/departures/route_type/0/stop/1071?max_results=5&amp;date_utc=2020-05-18T12:14:10&amp;include_cancelled=false 
+Retrieved: 2020-05-18 22:14:11 AEST 
+Status code: 200 
+# A tibble: 75 x 11
+   direction_id stop_id route_id run_id platform_number at_platform departure_seque…
+          &lt;int&gt;   &lt;int&gt;    &lt;int&gt;  &lt;int&gt; &lt;chr&gt;           &lt;lgl&gt;                  &lt;int&gt;
+ 1            5    1071        6 952531 9               FALSE                      0
+ 2            2    1071        3 953881 5               FALSE                      0
+ 3           13    1071       14 954655 4               FALSE                      0
+ 4            6    1071        7 950675 2               FALSE                      0
+ 5            9    1071        5 949763 1               FALSE                      0
+ 6           16    1071       17 954539 9               FALSE                      0
+ 7           11    1071       12 988175 13              FALSE                      0
+ 8           10    1071       11 952689 6               FALSE                      0
+ 9            8    1071        9 951849 3               FALSE                      0
+10           14    1071       15 953653 4               FALSE                      0
+# … with 65 more rows, and 4 more variables: scheduled_departure &lt;dttm&gt;,
+#   estimated_departure &lt;dttm&gt;, flags &lt;chr&gt;, disruption_ids &lt;list&gt;</code></pre>
+<p>Most importantly, because I haven’t defined any methods like <code>mutate.ptvapi()</code>, every generic other than <code>print()</code> will treat this tibble as a tibble. So all of my data manipulation functions will ignore the metadata I’ve attached to this tibble.</p>
+<p>A quick heads up: it’s not guaranteed that every function will preserve attributes. So after manipulation, the “ptvapi” class may be lost, along with the metadata. That’s fine for my purpose, but maybe not for yours.</p>
+<hr />
+<pre class="r"><code>devtools::session_info()</code></pre>
+<pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
+##  setting  value                       
+##  version  R version 4.1.0 (2021-05-18)
+##  os       macOS Big Sur 11.3          
+##  system   aarch64, darwin20           
+##  ui       X11                         
+##  language (EN)                        
+##  collate  en_AU.UTF-8                 
+##  ctype    en_AU.UTF-8                 
+##  tz       Australia/Melbourne         
+##  date     2021-05-30                  
+## 
+## ─ Packages ───────────────────────────────────────────────────────────────────
+##  package     * version date       lib source        
+##  blogdown      1.3     2021-04-14 [1] CRAN (R 4.1.0)
+##  bookdown      0.22    2021-04-22 [1] CRAN (R 4.1.0)
+##  bslib         0.2.5.1 2021-05-18 [1] CRAN (R 4.1.0)
+##  cachem        1.0.4   2021-02-13 [1] CRAN (R 4.1.0)
+##  callr         3.7.0   2021-04-20 [1] CRAN (R 4.1.0)
+##  cli           2.5.0   2021-04-26 [1] CRAN (R 4.1.0)
+##  crayon        1.4.1   2021-02-08 [1] CRAN (R 4.1.0)
+##  desc          1.3.0   2021-03-05 [1] CRAN (R 4.1.0)
+##  devtools      2.4.0   2021-04-07 [1] CRAN (R 4.1.0)
+##  digest        0.6.27  2020-10-24 [1] CRAN (R 4.1.0)
+##  ellipsis      0.3.2   2021-04-29 [1] CRAN (R 4.1.0)
+##  evaluate      0.14    2019-05-28 [1] CRAN (R 4.1.0)
+##  fastmap       1.1.0   2021-01-25 [1] CRAN (R 4.1.0)
+##  fs            1.5.0   2020-07-31 [1] CRAN (R 4.1.0)
+##  glue          1.4.2   2020-08-27 [1] CRAN (R 4.1.0)
+##  htmltools     0.5.1.1 2021-01-22 [1] CRAN (R 4.1.0)
+##  jquerylib     0.1.4   2021-04-26 [1] CRAN (R 4.1.0)
+##  jsonlite      1.7.2   2020-12-09 [1] CRAN (R 4.1.0)
+##  knitr         1.33    2021-04-24 [1] CRAN (R 4.1.0)
+##  lifecycle     1.0.0   2021-02-15 [1] CRAN (R 4.1.0)
+##  magrittr      2.0.1   2020-11-17 [1] CRAN (R 4.1.0)
+##  memoise       2.0.0   2021-01-26 [1] CRAN (R 4.1.0)
+##  pkgbuild      1.2.0   2020-12-15 [1] CRAN (R 4.1.0)
+##  pkgload       1.2.1   2021-04-06 [1] CRAN (R 4.1.0)
+##  prettyunits   1.1.1   2020-01-24 [1] CRAN (R 4.1.0)
+##  processx      3.5.2   2021-04-30 [1] CRAN (R 4.1.0)
+##  ps            1.6.0   2021-02-28 [1] CRAN (R 4.1.0)
+##  purrr         0.3.4   2020-04-17 [1] CRAN (R 4.1.0)
+##  R6            2.5.0   2020-10-28 [1] CRAN (R 4.1.0)
+##  remotes       2.3.0   2021-04-01 [1] CRAN (R 4.1.0)
+##  rlang         0.4.11  2021-04-30 [1] CRAN (R 4.1.0)
+##  rmarkdown     2.8     2021-05-07 [1] CRAN (R 4.1.0)
+##  rprojroot     2.0.2   2020-11-15 [1] CRAN (R 4.1.0)
+##  sass          0.4.0   2021-05-12 [1] CRAN (R 4.1.0)
+##  sessioninfo   1.1.1   2018-11-05 [1] CRAN (R 4.1.0)
+##  stringi       1.6.1   2021-05-10 [1] CRAN (R 4.1.0)
+##  stringr       1.4.0   2019-02-10 [1] CRAN (R 4.1.0)
+##  testthat      3.0.2   2021-02-14 [1] CRAN (R 4.1.0)
+##  usethis       2.0.1   2021-02-10 [1] CRAN (R 4.1.0)
+##  withr         2.4.2   2021-04-18 [1] CRAN (R 4.1.0)
+##  xfun          0.22    2021-03-11 [1] CRAN (R 4.1.0)
+##  yaml          2.2.1   2020-02-01 [1] CRAN (R 4.1.0)
+## 
+## [1] /Library/Frameworks/R.framework/Versions/4.1-arm64/Resources/library</code></pre>

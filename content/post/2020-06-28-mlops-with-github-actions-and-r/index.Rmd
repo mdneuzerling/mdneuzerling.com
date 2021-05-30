@@ -9,7 +9,7 @@ images: ["/img/github-actions-comment.png"]
 featuredalt: |
     A comment on a GitHub Actions pull request, giving various numeric metrics.
     The commenter is "github-actions", and is labelled as a "bot".
-output: hugodown::md_document
+
 ---
 
 Machine learning models get stuck at the deployment stage all the time. This stuff is hard.

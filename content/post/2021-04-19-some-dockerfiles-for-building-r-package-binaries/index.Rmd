@@ -6,7 +6,7 @@ slug: some-dockerfiles-for-building-r-package-binaries
 tags:
     - r
 images: ["/img/lego-build.jpg"]
-output: hugodown::md_document
+
 ---
     
 ```{r setup, include=FALSE, eval=FALSE}

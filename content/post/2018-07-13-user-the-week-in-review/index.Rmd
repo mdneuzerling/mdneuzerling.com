@@ -7,7 +7,7 @@ categories: []
 tags: [R, conference]
 images: ["/img/useR/week_in_review.png"]
 featuredalt: "useR2018 Week in Review"
-output: hugodown::md_document
+
 ---
 
 That's it for #useR2018. After 6 keynotes, 132 parallel sessions, many more 

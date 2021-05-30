@@ -6,7 +6,7 @@ slug: determining-system-dependencies-for-r-projects
 tags:
     - R
 images: ["/img/dependencies.jpg"]
-output: hugodown::md_document
+
 ---
     
 ```{r setup, include=FALSE}

@@ -1,0 +1,213 @@
+---
+title: 'useR: The Week in Review'
+author: ''
+date: '2018-07-13'
+slug: user-the-week-in-review
+categories: []
+tags: [R, conference]
+images: ["/img/useR/week_in_review.png"]
+featuredalt: "useR2018 Week in Review"
+
+---
+
+<script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
+
+
+<p>That’s it for #useR2018. After 6 keynotes, 132 parallel sessions, many more
+lightning talks and posters, and an all-important conference dinner, we’ve
+reached the end of the week.</p>
+<p>This was my first proper conference since 2015. I had almost forgotten how
+it felt to be surrounded by hundreds of people who are just as passionate
+(if not more) about your tiny area of specialised knowledge than you are.</p>
+<p>I took notes for the three tutorials I went to, but I wanted to take a moment
+to review the week as a whole, including the talks that stood out to me.
+You can find my tutorial notes below:</p>
+<ul>
+<li><a href="/post/user-getting-started-with-r-and-docker/">Tutorial one: Getting Started with R and Docker</a></li>
+<li><a href="/post/user-recipes-for-data-processing/">Tutorial two: Recipes for Data Processing</a></li>
+<li><a href="/post/user-missing-values-imputation/">Tutorial three: Missing Values Imputation</a></li>
+</ul>
+<p>All talks and tutorials were recorded, so keep an eye out for them on the
+<a href="https://user2018.r-project.org/">useR2018 site</a>. The #rstats community is
+active on Twitter, so check out the <a href="https://twitter.com/search?q=%23useR2018">#useR2018</a>
+hashtag as well.</p>
+<div class="figure">
+<img src="img/hexwall.jpg" alt="" />
+<p class="caption">The famous #hexwall, with <a href="https://twitter.com/AdamGruer">Adam Gruer</a></p>
+</div>
+<div id="a-quick-personal-note" class="section level2">
+<h2>A quick personal note</h2>
+<p>I’d like to declare my own biggest success and biggest failure of the
+conference:</p>
+<ul>
+<li><strong>Biggest personal win</strong>: I posted notes from each of the three tutorials I
+went to! This forced me to learn more about PCA, which is a big win.</li>
+<li><strong>Biggest personal not-win</strong>: I didn’t present anything. I told myself this
+was because I had nothing to present, but I’m not so sure that’s true.</li>
+</ul>
+</div>
+<div id="talk-highlights" class="section level2">
+<h2>Talk highlights</h2>
+<ul>
+<li><a href="https://twitter.com/StephdeSilva">Steph de Silva</a> spoke of R as not just a
+language but a <em>community</em>. And in this community you go from seeing R as
+something you use to seeing R as something you share. The R subculture(s) have
+real power to contribute in a world where data affects decisions.</li>
+<li><a href="https://twitter.com/robjhyndman">Rob Hyndman</a>’s new <code>fable</code> package looks
+super easy to use. It’s a tidyverse-compatible replacement for his extremely
+popular <code>forecast</code> package. He calls it “fable” because “fables aren’t true but
+they tell you something useful about reality, just like a forecast.”</li>
+<li><a href="https://twitter.com/thomasp85">Thomas Lin Pedersen</a> is rewriting the
+<code>gganimate</code> package and it looks <em>so cool</em>. He described visualisation as
+existing on a spectrum between static, interactive, and animated. Traditional
+media (eg. newspapers) use static visualisation and modern journalism websites
+use interactive visualisation, but animated visualisation is often found in
+social media.</li>
+</ul>
+<p>{{% tweet "1014132180853903360" %}}</p>
+<ul>
+<li><a href="https://twitter.com/KatieSasso">Katie Sasso</a> introduced <strong>standalone Shiny
+applications</strong> using Electron. I am so keen to try these out! Imagine being
+able to distribute a Shiny app to someone without them needing to so much as
+install R.</li>
+<li><a href="https://twitter.com/nj_tierney">Nicholas Tierney</a>’s <code>maxcovr</code> package makes
+it easier to solve the <a href="https://en.wikipedia.org/wiki/Maximum_coverage_problem">maximal coverage location problem</a> in R.
+His choice of example was apt. Brisbane offers free public wifi in and around
+the CBD, and the <code>maxcovr</code> package can be used to identify optimal placemennt
+of new routers to improver the coverage population and area.</li>
+<li><a href="https://twitter.com/rdpeng">Roger D. Peng</a> spoke about the teaching R.
+I loved the quote from John Chambers on S (R’s predecessor): “We wanted users
+to begin in an interactive environment, where they did not consciously think of
+themselves as programming… they should be able to slide gradually into
+programming.” This is the R value proposition in a nutshell for me: you don’t
+<em>have</em> to jump into the developer side of things, but if you want to start
+going down that path it’s a gradual transition.</li>
+</ul>
+<p>{{% tweet "1017552963861037056" %}}</p>
+<ul>
+<li><a href="https://twitter.com/JennyBryan">Jenny Bryan</a> spoke about code smells and
+feels. Whenever I read something cool and useful about R I look at the author
+and there’s a good chance it’s Jenny. I like that the advice in her talk is
+more “use this in moderation” rather than the prescriptive “Don’t do this”.</li>
+<li><a href="https://twitter.com/djnavarro">Danielle Navarro</a> shared her experience in
+teaching R to psychology students. This one resonated, especially with her
+emphasis on student fear. Student fear stops learning before it can begin!</li>
+<li><a href="https://twitter.com/MMaechler">Martin Mächler</a> of the R Core team discussed
+an often-neglected topic: numerical precision. It was a chance to get into the
+guts of R. He also gave the following bizarre example:</li>
+</ul>
+<pre class="r"><code>unique((1:10)/10 - (0:9)/10)</code></pre>
+<pre><code>## [1] 0.1 0.1 0.1 0.1</code></pre>
+<blockquote>
+<p>“10.0 times 0.1 is hardly ever 1.0” - <em>The Elements of Programming Style</em> by Brian W. Kernighan and P. J. Plauger</p>
+</blockquote>
+</div>
+<div id="wrapping-up" class="section level2">
+<h2>Wrapping up</h2>
+<p>Thank you to the organisers and to everyone who contributed to the conference.</p>
+<p>I met a tonne of people here and I can’t mention everyone. Thank you to the
+following people for existing and for making my #useR2018 experience
+extra-special:
+<a href="https://twitter.com/AdamGruer">Adam Gruer</a>,
+<a href="https://twitter.com/Dale_Masch">Dale Maschette</a>,
+<a href="https://twitter.com/emilyandthelime">Emily Kothe</a>,
+<a href="https://twitter.com/john_t_ormerod">John Ormerod</a>,
+<a href="https://twitter.com/StephdeSilva">Steph de Silva</a>,
+<a href="https://twitter.com/cantabile">Charles T. Gray</a>, and
+<a href="https://twitter.com/BHarrap">Ben Harrap</a>.</p>
+<hr />
+<pre class="r"><code>devtools::session_info()</code></pre>
+<pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
+##  setting  value                       
+##  version  R version 4.1.0 (2021-05-18)
+##  os       macOS Big Sur 11.3          
+##  system   aarch64, darwin20           
+##  ui       X11                         
+##  language (EN)                        
+##  collate  en_AU.UTF-8                 
+##  ctype    en_AU.UTF-8                 
+##  tz       Australia/Melbourne         
+##  date     2021-05-30                  
+## 
+## ─ Packages ───────────────────────────────────────────────────────────────────
+##  package     * version date       lib source        
+##  assertthat    0.2.1   2019-03-21 [1] CRAN (R 4.1.0)
+##  backports     1.2.1   2020-12-09 [1] CRAN (R 4.1.0)
+##  blogdown      1.3     2021-04-14 [1] CRAN (R 4.1.0)
+##  bookdown      0.22    2021-04-22 [1] CRAN (R 4.1.0)
+##  broom         0.7.6   2021-04-05 [1] CRAN (R 4.1.0)
+##  bslib         0.2.5.1 2021-05-18 [1] CRAN (R 4.1.0)
+##  cachem        1.0.4   2021-02-13 [1] CRAN (R 4.1.0)
+##  callr         3.7.0   2021-04-20 [1] CRAN (R 4.1.0)
+##  cellranger    1.1.0   2016-07-27 [1] CRAN (R 4.1.0)
+##  cli           2.5.0   2021-04-26 [1] CRAN (R 4.1.0)
+##  colorspace    2.0-1   2021-05-04 [1] CRAN (R 4.1.0)
+##  crayon        1.4.1   2021-02-08 [1] CRAN (R 4.1.0)
+##  DBI           1.1.1   2021-01-15 [1] CRAN (R 4.1.0)
+##  dbplyr        2.1.1   2021-04-06 [1] CRAN (R 4.1.0)
+##  desc          1.3.0   2021-03-05 [1] CRAN (R 4.1.0)
+##  devtools      2.4.0   2021-04-07 [1] CRAN (R 4.1.0)
+##  digest        0.6.27  2020-10-24 [1] CRAN (R 4.1.0)
+##  dplyr       * 1.0.5   2021-03-05 [1] CRAN (R 4.1.0)
+##  ellipsis      0.3.2   2021-04-29 [1] CRAN (R 4.1.0)
+##  evaluate      0.14    2019-05-28 [1] CRAN (R 4.1.0)
+##  fansi         0.4.2   2021-01-15 [1] CRAN (R 4.1.0)
+##  fastmap       1.1.0   2021-01-25 [1] CRAN (R 4.1.0)
+##  forcats     * 0.5.1   2021-01-27 [1] CRAN (R 4.1.0)
+##  fs            1.5.0   2020-07-31 [1] CRAN (R 4.1.0)
+##  generics      0.1.0   2020-10-31 [1] CRAN (R 4.1.0)
+##  ggplot2     * 3.3.3   2020-12-30 [1] CRAN (R 4.1.0)
+##  glue          1.4.2   2020-08-27 [1] CRAN (R 4.1.0)
+##  gtable        0.3.0   2019-03-25 [1] CRAN (R 4.1.0)
+##  haven         2.4.1   2021-04-23 [1] CRAN (R 4.1.0)
+##  hms           1.0.0   2021-01-13 [1] CRAN (R 4.1.0)
+##  htmltools     0.5.1.1 2021-01-22 [1] CRAN (R 4.1.0)
+##  httr          1.4.2   2020-07-20 [1] CRAN (R 4.1.0)
+##  jquerylib     0.1.4   2021-04-26 [1] CRAN (R 4.1.0)
+##  jsonlite      1.7.2   2020-12-09 [1] CRAN (R 4.1.0)
+##  knitr         1.33    2021-04-24 [1] CRAN (R 4.1.0)
+##  lifecycle     1.0.0   2021-02-15 [1] CRAN (R 4.1.0)
+##  lubridate     1.7.10  2021-02-26 [1] CRAN (R 4.1.0)
+##  magrittr      2.0.1   2020-11-17 [1] CRAN (R 4.1.0)
+##  memoise       2.0.0   2021-01-26 [1] CRAN (R 4.1.0)
+##  modelr        0.1.8   2020-05-19 [1] CRAN (R 4.1.0)
+##  munsell       0.5.0   2018-06-12 [1] CRAN (R 4.1.0)
+##  pillar        1.6.1   2021-05-16 [1] CRAN (R 4.1.0)
+##  pkgbuild      1.2.0   2020-12-15 [1] CRAN (R 4.1.0)
+##  pkgconfig     2.0.3   2019-09-22 [1] CRAN (R 4.1.0)
+##  pkgload       1.2.1   2021-04-06 [1] CRAN (R 4.1.0)
+##  prettyunits   1.1.1   2020-01-24 [1] CRAN (R 4.1.0)
+##  processx      3.5.2   2021-04-30 [1] CRAN (R 4.1.0)
+##  ps            1.6.0   2021-02-28 [1] CRAN (R 4.1.0)
+##  purrr       * 0.3.4   2020-04-17 [1] CRAN (R 4.1.0)
+##  R6            2.5.0   2020-10-28 [1] CRAN (R 4.1.0)
+##  Rcpp          1.0.6   2021-01-15 [1] CRAN (R 4.1.0)
+##  readr       * 1.4.0   2020-10-05 [1] CRAN (R 4.1.0)
+##  readxl        1.3.1   2019-03-13 [1] CRAN (R 4.1.0)
+##  remotes       2.3.0   2021-04-01 [1] CRAN (R 4.1.0)
+##  reprex        2.0.0   2021-04-02 [1] CRAN (R 4.1.0)
+##  rlang         0.4.11  2021-04-30 [1] CRAN (R 4.1.0)
+##  rmarkdown     2.8     2021-05-07 [1] CRAN (R 4.1.0)
+##  rprojroot     2.0.2   2020-11-15 [1] CRAN (R 4.1.0)
+##  rstudioapi    0.13    2020-11-12 [1] CRAN (R 4.1.0)
+##  rvest         1.0.0   2021-03-09 [1] CRAN (R 4.1.0)
+##  sass          0.4.0   2021-05-12 [1] CRAN (R 4.1.0)
+##  scales        1.1.1   2020-05-11 [1] CRAN (R 4.1.0)
+##  sessioninfo   1.1.1   2018-11-05 [1] CRAN (R 4.1.0)
+##  stringi       1.6.1   2021-05-10 [1] CRAN (R 4.1.0)
+##  stringr     * 1.4.0   2019-02-10 [1] CRAN (R 4.1.0)
+##  testthat      3.0.2   2021-02-14 [1] CRAN (R 4.1.0)
+##  tibble      * 3.1.2   2021-05-16 [1] CRAN (R 4.1.0)
+##  tidyr       * 1.1.3   2021-03-03 [1] CRAN (R 4.1.0)
+##  tidyselect    1.1.1   2021-04-30 [1] CRAN (R 4.1.0)
+##  tidyverse   * 1.3.1   2021-04-15 [1] CRAN (R 4.1.0)
+##  usethis       2.0.1   2021-02-10 [1] CRAN (R 4.1.0)
+##  utf8          1.2.1   2021-03-12 [1] CRAN (R 4.1.0)
+##  vctrs         0.3.8   2021-04-29 [1] CRAN (R 4.1.0)
+##  withr         2.4.2   2021-04-18 [1] CRAN (R 4.1.0)
+##  xfun          0.22    2021-03-11 [1] CRAN (R 4.1.0)
+##  xml2          1.3.2   2020-04-23 [1] CRAN (R 4.1.0)
+##  yaml          2.2.1   2020-02-01 [1] CRAN (R 4.1.0)
+## 
+## [1] /Library/Frameworks/R.framework/Versions/4.1-arm64/Resources/library</code></pre>
+</div>

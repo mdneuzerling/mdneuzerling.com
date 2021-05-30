@@ -8,7 +8,7 @@ tags: [R]
 description: ''
 images: ["/img/sending_an_email_with_rdcomclient.png"]
 featuredpath: 'img'
-output: hugodown::md_document
+
 ---
 
 If you work in a corporate environment, there's a good chance you're using 

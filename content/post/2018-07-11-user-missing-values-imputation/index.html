@@ -1,0 +1,394 @@
+---
+title: 'useR: Missing values imputation'
+author: ''
+slug: 'user-missing-values-imputation'
+date: '2018-07-11'
+categories: []
+tags: [R, conference]
+images: ["/img/useR/tutorial_three.png"]
+featuredalt: "useR2018 Tutorial Three"
+output: hugodown::hugo_document
+---
+
+<script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
+
+
+<p>These are my notes for the third and final tutorial of useR2018, and the
+tutorial I was looking forward to the most. I <em>struggle</em> with missing value
+imputation. It’s one of those things which I kind of get the theory of, but
+fall over when trying to <em>do</em>. So I was keen to hear
+<a href="https://twitter.com/juliejossestat">Julie Joss</a> and
+<a href="https://twitter.com/nj_tierney">Nick Tierney</a> talk about their techniques and
+associated R packages.</p>
+<p>{{% tweet "1015223952594128897" %}}</p>
+<p>I ran into a wall pretty early on here in that I wasn’t very comfortable with
+Principal Component Analysis (PCA). I took the opportunity to learn a bit more
+about this common technique, and try to understand the intuition behind it.</p>
+<p>The data and slides for Julie’s and Nick’s tutorial are available on
+<a href="https://github.com/njtierney/user2018-missing-data-tutorial">Nick’s GitHub</a>.</p>
+<p>Required packages:</p>
+<pre class="r"><code>install.packages(c(&quot;tidyverse&quot;, &quot;ggplot2&quot;, &quot;naniar&quot;, &quot;visdat&quot;, &quot;missMDA&quot;))</code></pre>
+<div id="ozone-data-set" class="section level2">
+<h2><code>Ozone</code> data set</h2>
+<p>The data in use today is the Ozone data set from Airbreizh, a French association
+that monitors air quality. We’re only going to focus on the quantitative
+variables here, so we will drop the <code>WindDirection</code> variable.</p>
+<pre class="r"><code>ozone &lt;- read_csv(&quot;ozoneNA.csv&quot;) %&gt;% 
+    select(-X1, -WindDirection) # unnecessary row index</code></pre>
+<pre><code>## 
+## ── Column specification ────────────────────────────────────────────────────────
+## cols(
+##   X1 = col_double(),
+##   maxO3 = col_double(),
+##   T9 = col_double(),
+##   T12 = col_double(),
+##   T15 = col_double(),
+##   Ne9 = col_double(),
+##   Ne12 = col_double(),
+##   Ne15 = col_double(),
+##   Vx9 = col_double(),
+##   Vx12 = col_double(),
+##   Vx15 = col_double(),
+##   maxO3v = col_double(),
+##   WindDirection = col_character()
+## )</code></pre>
+</div>
+<div id="patterns-of-missing-data" class="section level2">
+<h2>Patterns of missing data</h2>
+<p>The easiest way to deal with missing data is to delete it. But this ignores any
+pattern in the missing data, as well as any mechanism that leads to missing
+values. Some data sets can also contain a majority of values that have at least
+one missing value, and so deleting missing values would delete most of the data!</p>
+<p>Missing values occur in three main patterns based on their relationship with
+the observed and even the unobserved variables of the data:</p>
+<ul>
+<li>Missing Completely at Random (<strong>MCAR</strong>): probability of data being missing is
+independent of the observed and unobserved variables.</li>
+<li>Missing at Random (<strong>MAR</strong>): probability is not independent of the observed
+values (ie. is not random) but the observed variables do not fully account for
+the pattern. In this case, there may be unobserved variables affecting the
+probability that the data will be missing.</li>
+<li>Missing not at random (<strong>MNAR</strong>): probability of data being missing depends
+on the observed values of the data.</li>
+</ul>
+</div>
+<div id="visualising-missing-data" class="section level2">
+<h2>Visualising missing data</h2>
+<p><em>Multiple correspondence analysis</em> visualises data in such a way that
+relationships between missing values are often made apparent. One implementation
+of this is the <code>naniar</code> package:</p>
+<pre class="r"><code>vis_miss(ozone)</code></pre>
+<p><img src="{{< blogdown/postref >}}index_files/figure-html/missing_naniar-1.png" width="672" /></p>
+<p>We can repeat the visualisation with an option to <code>cluster</code> the missing values,
+making it easier to spot patterns, if any.</p>
+<pre class="r"><code>vis_miss(ozone, cluster = TRUE)</code></pre>
+<p><img src="{{< blogdown/postref >}}index_files/figure-html/missing_naniar_cluster-1.png" width="672" /></p>
+</div>
+<div id="dealing-with-missing-values" class="section level2">
+<h2>Dealing with missing values</h2>
+<p>Suppose we <em>don’t</em> want to delete our missing data and pretend that everything
+is fine. Then we might look to <em>impute</em> the missing values. That is to say, we
+might want to look at the data we do have to determine what the missing values
+might have been.</p>
+<p>One of the easiest methods of imputation is that of <em>mean imputation</em>. In this
+case, we replace all of the missing values by the mean of the present values of
+the given variable.</p>
+<p>We could also define a model on the present values of the data to predict what
+the missing value might have been. A simple linear regression might suffice.</p>
+<p>A more sophisticated method involves the use of Principal Component Analysis.</p>
+</div>
+<div id="a-refresher-on-pca" class="section level2">
+<h2>A refresher on PCA</h2>
+<p>I don’t understand Principal Component Analysis (PCA). Believe me, I’ve tried.</p>
+<p>The goal of PCA is to find the subspace that best represents the data. The
+outcome of PCA is a set of uncorrelated variables called <em>principal
+components</em>.</p>
+<p><a href="http://www.cs.otago.ac.nz/cosc453/student_tutorials/principal_components.pdf">This is a wonderful (but long) article on PCA</a> (pdf).
+It’s gentle without being patronising. I’ll highlight some points in the
+article here, but it’s well worth finding the time to read the article in full.</p>
+<p>First of all, recall the definition of an <em>eigenvector</em>. You probably
+encountered this in your first or second year of university, and then promptly
+forgot it. In the example below, the column vector <span class="math inline">\((6, 4)^T\)</span> is an eigenvector
+of the square matrix, because the result of the matrix multiplication is a scale
+multiple of <span class="math inline">\((6, 4)^T\)</span>. In other words, the square matrix makes the eigenvector
+<em>bigger</em>, but it doesn’t change its <em>direction</em>. The scalar multiple is <span class="math inline">\(4\)</span>, and
+that’s the <em>eigenvalue</em> associated with the eigenvector.</p>
+<p><span class="math display">\[
+\left(\begin{array}{cc} 
+2 &amp; 3 \\
+2 &amp; 1
+\end{array}\right) \times
+\left(\begin{array}{c} 
+6 \\
+4
+\end{array}\right) = 
+\left(\begin{array}{c} 
+24 \\
+16
+\end{array}\right) = 
+4 \left(\begin{array}{c} 
+6 \\
+4
+\end{array}\right)
+\]</span>
+But how does this relate to stats? Well a data set gives rise to a <em>covariance
+matrix</em>, in which the <span class="math inline">\(ij\)</span>th cell of the matrix is the covariance between the
+<span class="math inline">\(i\)</span>th variable and the <span class="math inline">\(j\)</span>th variable (the variance of each variable sits along
+the diagonal). This is a square matrix, so we can find some eigenvectors.</p>
+<p>I don’t remember a whole lot of the linear algebra I learnt a long time ago, so
+I had to be reminded of two quick theorems in play here. A covariance matrix is
+symmetric, so we can make use of the following:</p>
+<ul>
+<li>Eigenvectors of real symmetric matrices are real</li>
+<li>Eigenvectors of real symmetric matrices are orthogonal</li>
+</ul>
+<p>{{% tweet "997147577173925888" %}}</p>
+<p>Let’s go through
+an example. Take the classic <code>mtcars</code> data set, and draw a scatterplot between
+<code>wt</code> (weight) and <code>mpg</code> (miles per gallon). We’re going to work on data that’s
+been centered and rescaled so as to make the eigenvectors look right, as well
+as for other reasons that will become apparent soon.</p>
+<pre class="r"><code>mtcars_scaled &lt;- mtcars %&gt;% 
+    select(wt, mpg) %&gt;% 
+    mutate_all(scale)
+mtcars_scaled %&gt;% ggplot(aes(x = wt, y = mpg)) + 
+    geom_point() + 
+    coord_fixed() # makes the plot square</code></pre>
+<p><img src="{{< blogdown/postref >}}index_files/figure-html/mtcars-1.png" width="672" /></p>
+<p>Let’s calculate the PCA eigenvectors. These are eigenvectors of the covariance
+matrix. Because we have two variables we have two eigenvectors (another property
+of symmetric matrices), which we’ll call <code>PC1</code> and <code>PC2</code>. You don’t need a
+install a package to calculate these, as we can use the preinstalled <code>prcomp</code>
+function.</p>
+<pre class="r"><code>PC &lt;- prcomp(~ wt + mpg, data = mtcars_scaled)
+PC</code></pre>
+<pre><code>## Standard deviations (1, .., p=2):
+## [1] 1.3666233 0.3637865
+## 
+## Rotation (n x k) = (2 x 2):
+##            PC1       PC2
+## wt   0.7071068 0.7071068
+## mpg -0.7071068 0.7071068</code></pre>
+<pre class="r"><code>PC1 &lt;- PC$rotation[,1]
+PC2 &lt;- PC$rotation[,2]
+
+mtcars_scaled %&gt;% ggplot(aes(x = wt, y = mpg)) + 
+    geom_point() +
+    geom_segment(aes(x = 0, xend = PC1[[&quot;wt&quot;]], y = 0, yend = PC1[[&quot;mpg&quot;]]), arrow = arrow(length = unit(0.5, &quot;cm&quot;)), col = &quot;red&quot;) + 
+    geom_segment(aes(x = 0, xend = PC2[[&quot;wt&quot;]], y = 0, yend = PC2[[&quot;mpg&quot;]]), arrow = arrow(length = unit(0.5, &quot;cm&quot;)), col = &quot;red&quot;) + 
+    coord_fixed() # makes the plot square</code></pre>
+<p><img src="{{< blogdown/postref >}}index_files/figure-html/mtcars_pc-1.png" width="672" /></p>
+<p>Look at those eigenvectors! The eigenvectors used in PCA are always normalised,
+so that the magnitude of the vectors are all <span class="math inline">\(1\)</span>. That is, we have some
+mutually orthogonal unit vectors…it’s a <strong>change of basis</strong>! Any point in the
+data set can be described by the original <span class="math inline">\(x\)</span> and <span class="math inline">\(y\)</span> axes, but it can also be
+described by a linear combination of our new PC eigenvectors!</p>
+<p>So we haven’t done anything to the data yet, apart from some basic scaling and
+centering. But every eigenvector has an associated eigenvalue. In this case, the
+higher the eigenvalue, the more the eigenvector is stretched by the (modified)
+covariance matrix. That is to say, the higher the eigenvalue, <strong>the more variance
+explained by the eigenvector</strong>. This is why we had to rescale the data so that
+each variable starts with a variance of <span class="math inline">\(1\)</span>—if we didn’t, the variables with
+higher variance, such as <code>mpg</code>, would appear artifically more important.</p>
+<pre class="r"><code>summary(PC)</code></pre>
+<pre><code>## Importance of components:
+##                           PC1     PC2
+## Standard deviation     1.3666 0.36379
+## Proportion of Variance 0.9338 0.06617
+## Cumulative Proportion  0.9338 1.00000</code></pre>
+<p>PCA’s primary use is for dimension reduction. You can use the ranking of the
+eigenvalues to determine what eigenvectors contribute the most to the variance
+of the data. You’ll drop a dimension by losing some of your information, but it
+will be the least valuable information.</p>
+</div>
+<div id="pca-imputation" class="section level2">
+<h2>PCA imputation</h2>
+<p>At this point I had re-learnt enough PCA to get by, Time to revisit the matter
+of missing data!</p>
+<p>Here’s how this works. First we need to choose a number of dimensions <span class="math inline">\(S\)</span> to
+keep at each step (more about this later).</p>
+<ol style="list-style-type: decimal">
+<li>Start with mean imputation, which assigns the variable mean to every missing
+value.</li>
+<li>Apply PCA and keep <span class="math inline">\(S\)</span> dimensions.</li>
+<li>Re-impute the missing values with the new mean.</li>
+<li>Repeat steps 2 and 3 until the values converge.</li>
+</ol>
+<p>The <code>missMDA</code> package handles this for us. First we need to work out how many
+dimensions we want to keep when doing our PCA. The <code>missMDA</code> package contains
+an <code>estim_ncpPCA</code> function that helps us determine the value of <span class="math inline">\(S\)</span> that
+minimises the <strong>mean squared error of prediction (MSEP)</strong>.</p>
+<pre class="r"><code>nb &lt;- estim_ncpPCA(ozone, method.cv = &quot;Kfold&quot;)</code></pre>
+<pre class="r"><code>ggplot(data = NULL, aes(x = 0:5, y = nb$criterion)) + 
+    geom_point() + 
+    geom_line() + 
+    xlab(&quot;nb dim&quot;) + 
+    ylab(&quot;MSEP&quot;)</code></pre>
+<p><img src="{{< blogdown/postref >}}index_files/figure-html/ozone_PCA_plot-1.png" width="672" /></p>
+<p>We can see that the MSEP is minimised when the <span class="math inline">\(S\)</span> is 3, a
+number we can also access with <code>nb$ncp</code>. We can now perform the actual PCA
+imputation. This doesn’t work with tibbles, so I convert the data to a data
+frame before piping it into the impute function.</p>
+<pre class="r"><code>ozone_comp &lt;- ozone %&gt;% as.data.frame %&gt;% imputePCA(ncp = nb$ncp)</code></pre>
+<p>Now let’s compare the original data to the complete data. The <code>imputePCA</code>
+function returns a list, which we convert to a tibble. There are also some
+new columns containing fitted values, which we’ll set aside for an easier
+comparison.</p>
+<p>We’ll also remove the <code>completedObs.</code> prefix of the variable
+names. The regex pattern used here, <code>".*(?&lt;=\\.)"</code>, matches everything up to
+and including the last dot in the column names. I use this pattern * a lot*.
+Note that you’ll need <code>perl = TRUE</code> to use the lookahead.</p>
+<pre class="r"><code>ozone %&gt;% head</code></pre>
+<pre><code>## # A tibble: 6 x 11
+##   maxO3    T9   T12   T15   Ne9  Ne12  Ne15    Vx9   Vx12   Vx15 maxO3v
+##   &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;
+## 1    87  15.6  18.5  NA       4     4     8  0.695 -1.71  -0.695     84
+## 2    82  NA    NA    NA       5     5     7 -4.33  -4     -3         87
+## 3    92  15.3  17.6  19.5     2    NA    NA  2.95  NA      0.521     82
+## 4   114  16.2  19.7  NA       1     1     0 NA      0.347 -0.174     92
+## 5    94  NA    20.5  20.4    NA    NA    NA -0.5   -2.95  -4.33     114
+## 6    80  17.7  19.8  18.3     6    NA     7 -5.64  -5     -6         94</code></pre>
+<pre class="r"><code>ozone_comp %&gt;% 
+    as.data.frame %&gt;% # seems to need this intermediate step?
+    as_tibble %&gt;% 
+    select(contains(&quot;complete&quot;)) %&gt;% 
+    rename_all(gsub, pattern = &quot;.*(?&lt;=\\.)&quot;, replacement = &#39;&#39;, perl = TRUE) %&gt;%  
+    head</code></pre>
+<pre><code>## # A tibble: 6 x 11
+##   maxO3    T9   T12   T15   Ne9  Ne12  Ne15    Vx9   Vx12   Vx15 maxO3v
+##   &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;
+## 1    87  15.6  18.5  20.4  4     4     8     0.695 -1.71  -0.695     84
+## 2    82  18.4  20.8  21.7  5     5     7    -4.33  -4     -3         87
+## 3    92  15.3  17.6  19.5  2     3.50  3.05  2.95   1.85   0.521     82
+## 4   114  16.2  19.7  24.3  1     1     0     0.426  0.347 -0.174     92
+## 5    94  19.2  20.5  20.4  5.93  5.92  5.86 -0.5   -2.95  -4.33     114
+## 6    80  17.7  19.8  18.3  6     6.89  7    -5.64  -5     -6         94</code></pre>
+</div>
+<div id="i-missed-a-lot" class="section level2">
+<h2>I missed a lot</h2>
+<p>Because I was catching up on PCA, I missed a fair chunk of the tutorial. In
+particular, I missed a whole discussion on evaluating how well the missing
+data was imputed. I also missed some stuff on random forests, and I love
+random forests!</p>
+<p>But I learnt a tonne, and I’m grateful for the opportunity to dig into two
+topics I usually struggle with: PCA and missing value imputation. Thank you
+to Julie and Nick for the tutorial.</p>
+<p>Now, onward to the official launch of the #useR2018!</p>
+<hr />
+<pre class="r"><code>devtools::session_info()</code></pre>
+<pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
+##  setting  value                       
+##  version  R version 4.1.0 (2021-05-18)
+##  os       macOS Big Sur 11.3          
+##  system   aarch64, darwin20           
+##  ui       X11                         
+##  language (EN)                        
+##  collate  en_AU.UTF-8                 
+##  ctype    en_AU.UTF-8                 
+##  tz       Australia/Melbourne         
+##  date     2021-05-30                  
+## 
+## ─ Packages ───────────────────────────────────────────────────────────────────
+##  package       * version date       lib source        
+##  assertthat      0.2.1   2019-03-21 [1] CRAN (R 4.1.0)
+##  backports       1.2.1   2020-12-09 [1] CRAN (R 4.1.0)
+##  blogdown        1.3     2021-04-14 [1] CRAN (R 4.1.0)
+##  bookdown        0.22    2021-04-22 [1] CRAN (R 4.1.0)
+##  broom           0.7.6   2021-04-05 [1] CRAN (R 4.1.0)
+##  bslib           0.2.5.1 2021-05-18 [1] CRAN (R 4.1.0)
+##  cachem          1.0.4   2021-02-13 [1] CRAN (R 4.1.0)
+##  callr           3.7.0   2021-04-20 [1] CRAN (R 4.1.0)
+##  cellranger      1.1.0   2016-07-27 [1] CRAN (R 4.1.0)
+##  cli             2.5.0   2021-04-26 [1] CRAN (R 4.1.0)
+##  cluster         2.1.2   2021-04-17 [1] CRAN (R 4.1.0)
+##  codetools       0.2-18  2020-11-04 [1] CRAN (R 4.1.0)
+##  colorspace      2.0-1   2021-05-04 [1] CRAN (R 4.1.0)
+##  crayon          1.4.1   2021-02-08 [1] CRAN (R 4.1.0)
+##  DBI             1.1.1   2021-01-15 [1] CRAN (R 4.1.0)
+##  dbplyr          2.1.1   2021-04-06 [1] CRAN (R 4.1.0)
+##  desc            1.3.0   2021-03-05 [1] CRAN (R 4.1.0)
+##  devtools        2.4.0   2021-04-07 [1] CRAN (R 4.1.0)
+##  digest          0.6.27  2020-10-24 [1] CRAN (R 4.1.0)
+##  doParallel      1.0.16  2020-10-16 [1] CRAN (R 4.1.0)
+##  dplyr         * 1.0.5   2021-03-05 [1] CRAN (R 4.1.0)
+##  DT              0.18    2021-04-14 [1] CRAN (R 4.1.0)
+##  ellipsis        0.3.2   2021-04-29 [1] CRAN (R 4.1.0)
+##  evaluate        0.14    2019-05-28 [1] CRAN (R 4.1.0)
+##  FactoMineR      2.4     2020-12-11 [1] CRAN (R 4.1.0)
+##  fansi           0.4.2   2021-01-15 [1] CRAN (R 4.1.0)
+##  farver          2.1.0   2021-02-28 [1] CRAN (R 4.1.0)
+##  fastmap         1.1.0   2021-01-25 [1] CRAN (R 4.1.0)
+##  flashClust      1.01-2  2012-08-21 [1] CRAN (R 4.1.0)
+##  forcats       * 0.5.1   2021-01-27 [1] CRAN (R 4.1.0)
+##  foreach         1.5.1   2020-10-15 [1] CRAN (R 4.1.0)
+##  fs              1.5.0   2020-07-31 [1] CRAN (R 4.1.0)
+##  generics        0.1.0   2020-10-31 [1] CRAN (R 4.1.0)
+##  ggplot2       * 3.3.3   2020-12-30 [1] CRAN (R 4.1.0)
+##  ggrepel         0.9.1   2021-01-15 [1] CRAN (R 4.1.0)
+##  glue            1.4.2   2020-08-27 [1] CRAN (R 4.1.0)
+##  gtable          0.3.0   2019-03-25 [1] CRAN (R 4.1.0)
+##  haven           2.4.1   2021-04-23 [1] CRAN (R 4.1.0)
+##  highr           0.9     2021-04-16 [1] CRAN (R 4.1.0)
+##  hms             1.0.0   2021-01-13 [1] CRAN (R 4.1.0)
+##  htmltools       0.5.1.1 2021-01-22 [1] CRAN (R 4.1.0)
+##  htmlwidgets     1.5.3   2020-12-10 [1] CRAN (R 4.1.0)
+##  httr            1.4.2   2020-07-20 [1] CRAN (R 4.1.0)
+##  iterators       1.0.13  2020-10-15 [1] CRAN (R 4.1.0)
+##  jquerylib       0.1.4   2021-04-26 [1] CRAN (R 4.1.0)
+##  jsonlite        1.7.2   2020-12-09 [1] CRAN (R 4.1.0)
+##  knitr           1.33    2021-04-24 [1] CRAN (R 4.1.0)
+##  labeling        0.4.2   2020-10-20 [1] CRAN (R 4.1.0)
+##  lattice         0.20-44 2021-05-02 [1] CRAN (R 4.1.0)
+##  leaps           3.1     2020-01-16 [1] CRAN (R 4.1.0)
+##  lifecycle       1.0.0   2021-02-15 [1] CRAN (R 4.1.0)
+##  lubridate       1.7.10  2021-02-26 [1] CRAN (R 4.1.0)
+##  magrittr        2.0.1   2020-11-17 [1] CRAN (R 4.1.0)
+##  MASS            7.3-54  2021-05-03 [1] CRAN (R 4.1.0)
+##  memoise         2.0.0   2021-01-26 [1] CRAN (R 4.1.0)
+##  mice            3.13.0  2021-01-27 [1] CRAN (R 4.1.0)
+##  missMDA       * 1.18    2020-12-11 [1] CRAN (R 4.1.0)
+##  modelr          0.1.8   2020-05-19 [1] CRAN (R 4.1.0)
+##  munsell         0.5.0   2018-06-12 [1] CRAN (R 4.1.0)
+##  mvtnorm         1.1-1   2020-06-09 [1] CRAN (R 4.1.0)
+##  naniar        * 0.6.1   2021-05-14 [1] CRAN (R 4.1.0)
+##  pillar          1.6.1   2021-05-16 [1] CRAN (R 4.1.0)
+##  pkgbuild        1.2.0   2020-12-15 [1] CRAN (R 4.1.0)
+##  pkgconfig       2.0.3   2019-09-22 [1] CRAN (R 4.1.0)
+##  pkgload         1.2.1   2021-04-06 [1] CRAN (R 4.1.0)
+##  prettyunits     1.1.1   2020-01-24 [1] CRAN (R 4.1.0)
+##  processx        3.5.2   2021-04-30 [1] CRAN (R 4.1.0)
+##  ps              1.6.0   2021-02-28 [1] CRAN (R 4.1.0)
+##  purrr         * 0.3.4   2020-04-17 [1] CRAN (R 4.1.0)
+##  R6              2.5.0   2020-10-28 [1] CRAN (R 4.1.0)
+##  Rcpp            1.0.6   2021-01-15 [1] CRAN (R 4.1.0)
+##  readr         * 1.4.0   2020-10-05 [1] CRAN (R 4.1.0)
+##  readxl          1.3.1   2019-03-13 [1] CRAN (R 4.1.0)
+##  remotes         2.3.0   2021-04-01 [1] CRAN (R 4.1.0)
+##  reprex          2.0.0   2021-04-02 [1] CRAN (R 4.1.0)
+##  rlang           0.4.11  2021-04-30 [1] CRAN (R 4.1.0)
+##  rmarkdown       2.8     2021-05-07 [1] CRAN (R 4.1.0)
+##  rprojroot       2.0.2   2020-11-15 [1] CRAN (R 4.1.0)
+##  rstudioapi      0.13    2020-11-12 [1] CRAN (R 4.1.0)
+##  rvest           1.0.0   2021-03-09 [1] CRAN (R 4.1.0)
+##  sass            0.4.0   2021-05-12 [1] CRAN (R 4.1.0)
+##  scales          1.1.1   2020-05-11 [1] CRAN (R 4.1.0)
+##  scatterplot3d   0.3-41  2018-03-14 [1] CRAN (R 4.1.0)
+##  sessioninfo     1.1.1   2018-11-05 [1] CRAN (R 4.1.0)
+##  stringi         1.6.1   2021-05-10 [1] CRAN (R 4.1.0)
+##  stringr       * 1.4.0   2019-02-10 [1] CRAN (R 4.1.0)
+##  testthat        3.0.2   2021-02-14 [1] CRAN (R 4.1.0)
+##  tibble        * 3.1.2   2021-05-16 [1] CRAN (R 4.1.0)
+##  tidyr         * 1.1.3   2021-03-03 [1] CRAN (R 4.1.0)
+##  tidyselect      1.1.1   2021-04-30 [1] CRAN (R 4.1.0)
+##  tidyverse     * 1.3.1   2021-04-15 [1] CRAN (R 4.1.0)
+##  usethis         2.0.1   2021-02-10 [1] CRAN (R 4.1.0)
+##  utf8            1.2.1   2021-03-12 [1] CRAN (R 4.1.0)
+##  vctrs           0.3.8   2021-04-29 [1] CRAN (R 4.1.0)
+##  visdat        * 0.5.3   2019-02-15 [1] CRAN (R 4.1.0)
+##  withr           2.4.2   2021-04-18 [1] CRAN (R 4.1.0)
+##  xfun            0.22    2021-03-11 [1] CRAN (R 4.1.0)
+##  xml2            1.3.2   2020-04-23 [1] CRAN (R 4.1.0)
+##  yaml            2.2.1   2020-02-01 [1] CRAN (R 4.1.0)
+## 
+## [1] /Library/Frameworks/R.framework/Versions/4.1-arm64/Resources/library</code></pre>
+</div>

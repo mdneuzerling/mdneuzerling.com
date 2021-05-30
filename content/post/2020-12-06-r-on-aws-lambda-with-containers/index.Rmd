@@ -7,7 +7,7 @@ tags:
     - r
     - cloud
 images: ["/img/successful-test.png"]
-output: hugodown::md_document
+
 ---
     
 ```{r setup, include=FALSE}

@@ -8,7 +8,7 @@ tags:
   - R
 images: ["/img/pipes.jpeg"]
 featuredalt: "pipes"
-output: hugodown::md_document
+
 ---
 
 When I found myself using R in a corporate environment, my workflow went 

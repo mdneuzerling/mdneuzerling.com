@@ -1,0 +1,1076 @@
+---
+title: Markdown monsters
+author: ''
+date: '2018-09-02'
+slug: markdown-monsters
+categories: []
+tags:
+  - R
+  - scraping
+images: ["/img/dice.jpg"]
+featuredalt: "dice"
+
+---
+
+<script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
+
+
+<p>Whenever I take an interest in something I think to myself, “How can I combine this with R?”</p>
+<p>This post is the result of applying that attitude to Dungeons and Dragons.</p>
+<p>So how would I combine D&amp;D with R? A good start would be to have a nice data set of Dungeons and Dragons monsters, with all of their statistics, abilities and attributes. One of the core D&amp;D rule books is the <a href="http://dnd.wizards.com/products/tabletop-games/rpg-products/monster-manual">Monster Manual</a>. I could attempt to scrape the Monster Manual but I figured that the lovely people behind D&amp;D wouldn’t be too happy if I uploaded most of the book to GitHub!</p>
+<p>Fortunately, Wizards of the Coast have included around 300 monsters in the <a href="http://dnd.wizards.com/articles/features/systems-reference-document-srd">Systems Reference Document</a> (SRD) for 5th edition D&amp;D. This is made available under the Open Gaming License Version 1.0a.</p>
+<p>I started off trying to scrape the SRD directly, but scraping a PDF was looking to be a nightmare. Fortunately, <a href="https://github.com/vitusventure/5thSRD">vitusventure had already converted the SRD to markdown documents</a> to host the content on the (rather pretty) <a href="https://5thsrd.org/">https://5thsrd.org/</a>. I figured it would be easier to scrape markdown files, since they are structured but simple text. Here’s an example of a monster’s “stat block” written in markdown:</p>
+<hr />
+<p>name: Medusa
+type: monstrosity
+cr: 6</p>
+<div id="medusa" class="section level1">
+<h1>Medusa</h1>
+<p><em>Medium monstrosity, lawful evil</em></p>
+<p><strong>Armor Class</strong> 15 (natural armor)<br />
+<strong>Hit Points</strong> 127 (17d8 + 51)<br />
+<strong>Speed</strong> 30 ft.</p>
+<table>
+<thead>
+<tr class="header">
+<th>STR</th>
+<th>DEX</th>
+<th>CON</th>
+<th>INT</th>
+<th>WIS</th>
+<th>CHA</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>10 (+0)</td>
+<td>15 (+2)</td>
+<td>16 (+3)</td>
+<td>12 (+1)</td>
+<td>13 (+1)</td>
+<td>15 (+2)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Skills</strong> Deception +5, Insight +4, Perception +4, Stealth +5<br />
+<strong>Senses</strong> darkvision 60 ft., passive Perception 14<br />
+<strong>Languages</strong> Common<br />
+<strong>Challenge</strong> 6 (2,300 XP)</p>
+<p><strong>Petrifying Gaze.</strong> When a creature that can see the medusa’s eyes starts its turn within 30 feet of the medusa, the medusa can force it to make a DC 14 Constitution saving throw if the medusa isn’t incapacitated and can see the creature. If the saving throw fails by 5 or more, the creature is instantly petrified. Otherwise, a creature that fails the save begins to turn to stone and is restrained. The restrained creature must repeat the saving throw at the end of its next turn, becoming petrified on a failure or ending the effect on a success. The petrification lasts until the creature is freed by the greater restoration spell or other magic.<br />
+Unless surprised, a creature can avert its eyes to avoid the saving throw at the start of its turn. If the creature does so, it can’t see the medusa until the start of its next turn, when it can avert its eyes again. If the creature looks at the medusa in the meantime, it must immediately make the save.<br />
+If the medusa sees itself reflected on a polished surface within 30 feet of it and in an area of bright light, the medusa is, due to its curse, affected by its own gaze.</p>
+<div id="actions" class="section level3">
+<h3>Actions</h3>
+<p><strong>Multiattack.</strong> The medusa makes either three melee attacks–one with its snake hair and two with its shortsword–or two ranged attacks with its longbow.<br />
+<strong>Snake Hair.</strong> <em>Melee Weapon Attack:</em> +5 to hit, reach 5 ft., one creature. <em>Hit:</em> 4 (1d4 + 2) piercing damage plus 14 (4d6) poison damage.<br />
+<strong>Shortsword.</strong> <em>Melee Weapon Attack:</em> +5 to hit, reach 5 ft., one target. <em>Hit:</em> 5 (1d6 + 2) piercing damage.<br />
+<strong>Longbow.</strong> <em>Ranged Weapon Attack:</em> +5 to hit, range 150/600 ft., one target. <em>Hit:</em> 6 (1d8 + 2) piercing damage plus 7 (2d6) poison damage.</p>
+<hr />
+<p>I put the scraped monsters in the SRD into the <code>monsters</code> data set and uploaded it to a quickly created <code>monstr</code> package. You can access the data set by installing the package with <code>devtools::install_github("mdneuzerling/monstr")</code>.</p>
+<pre class="r"><code>monsters &lt;- monstr::monsters
+skimr::skim(monsters)</code></pre>
+<table>
+<caption>(#tab:monstr_code)Data summary</caption>
+<tbody>
+<tr class="odd">
+<td align="left">Name</td>
+<td align="left">monsters</td>
+</tr>
+<tr class="even">
+<td align="left">Number of rows</td>
+<td align="left">317</td>
+</tr>
+<tr class="odd">
+<td align="left">Number of columns</td>
+<td align="left">39</td>
+</tr>
+<tr class="even">
+<td align="left">_______________________</td>
+<td align="left"></td>
+</tr>
+<tr class="odd">
+<td align="left">Column type frequency:</td>
+<td align="left"></td>
+</tr>
+<tr class="even">
+<td align="left">character</td>
+<td align="left">10</td>
+</tr>
+<tr class="odd">
+<td align="left">list</td>
+<td align="left">1</td>
+</tr>
+<tr class="even">
+<td align="left">numeric</td>
+<td align="left">28</td>
+</tr>
+<tr class="odd">
+<td align="left">________________________</td>
+<td align="left"></td>
+</tr>
+<tr class="even">
+<td align="left">Group variables</td>
+<td align="left">None</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Variable type: character</strong></p>
+<table>
+<thead>
+<tr class="header">
+<th align="left">skim_variable</th>
+<th align="right">n_missing</th>
+<th align="right">complete_rate</th>
+<th align="right">min</th>
+<th align="right">max</th>
+<th align="right">empty</th>
+<th align="right">n_unique</th>
+<th align="right">whitespace</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">name</td>
+<td align="right">0</td>
+<td align="right">1.00</td>
+<td align="right">3</td>
+<td align="right">25</td>
+<td align="right">0</td>
+<td align="right">317</td>
+<td align="right">0</td>
+</tr>
+<tr class="even">
+<td align="left">type</td>
+<td align="right">0</td>
+<td align="right">1.00</td>
+<td align="right">3</td>
+<td align="right">30</td>
+<td align="right">0</td>
+<td align="right">35</td>
+<td align="right">0</td>
+</tr>
+<tr class="odd">
+<td align="left">size</td>
+<td align="right">0</td>
+<td align="right">1.00</td>
+<td align="right">4</td>
+<td align="right">10</td>
+<td align="right">0</td>
+<td align="right">6</td>
+<td align="right">0</td>
+</tr>
+<tr class="even">
+<td align="left">alignment</td>
+<td align="right">0</td>
+<td align="right">1.00</td>
+<td align="right">7</td>
+<td align="right">40</td>
+<td align="right">0</td>
+<td align="right">16</td>
+<td align="right">0</td>
+</tr>
+<tr class="odd">
+<td align="left">ac_note</td>
+<td align="right">108</td>
+<td align="right">0.66</td>
+<td align="right">5</td>
+<td align="right">23</td>
+<td align="right">0</td>
+<td align="right">22</td>
+<td align="right">0</td>
+</tr>
+<tr class="even">
+<td align="left">hp</td>
+<td align="right">0</td>
+<td align="right">1.00</td>
+<td align="right">3</td>
+<td align="right">11</td>
+<td align="right">0</td>
+<td align="right">168</td>
+<td align="right">0</td>
+</tr>
+<tr class="odd">
+<td align="left">senses</td>
+<td align="right">0</td>
+<td align="right">1.00</td>
+<td align="right">20</td>
+<td align="right">170</td>
+<td align="right">0</td>
+<td align="right">88</td>
+<td align="right">0</td>
+</tr>
+<tr class="even">
+<td align="left">languages</td>
+<td align="right">0</td>
+<td align="right">1.00</td>
+<td align="right">1</td>
+<td align="right">91</td>
+<td align="right">0</td>
+<td align="right">86</td>
+<td align="right">0</td>
+</tr>
+<tr class="odd">
+<td align="left">speed</td>
+<td align="right">0</td>
+<td align="right">1.00</td>
+<td align="right">4</td>
+<td align="right">52</td>
+<td align="right">0</td>
+<td align="right">90</td>
+<td align="right">0</td>
+</tr>
+<tr class="even">
+<td align="left">description</td>
+<td align="right">274</td>
+<td align="right">0.14</td>
+<td align="right">96</td>
+<td align="right">654</td>
+<td align="right">0</td>
+<td align="right">43</td>
+<td align="right">0</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Variable type: list</strong></p>
+<table>
+<thead>
+<tr class="header">
+<th align="left">skim_variable</th>
+<th align="right">n_missing</th>
+<th align="right">complete_rate</th>
+<th align="right">n_unique</th>
+<th align="right">min_length</th>
+<th align="right">max_length</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">actions</td>
+<td align="right">3</td>
+<td align="right">0.99</td>
+<td align="right">305</td>
+<td align="right">1</td>
+<td align="right">10</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Variable type: numeric</strong></p>
+<table>
+<thead>
+<tr class="header">
+<th align="left">skim_variable</th>
+<th align="right">n_missing</th>
+<th align="right">complete_rate</th>
+<th align="right">mean</th>
+<th align="right">sd</th>
+<th align="right">p0</th>
+<th align="right">p25</th>
+<th align="right">p50</th>
+<th align="right">p75</th>
+<th align="right">p100</th>
+<th align="left">hist</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">cr</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">4.60</td>
+<td align="right">5.91</td>
+<td align="right">0</td>
+<td align="right">0.5</td>
+<td align="right">2</td>
+<td align="right">6</td>
+<td align="right">30</td>
+<td align="left">▇▁▁▁▁</td>
+</tr>
+<tr class="even">
+<td align="left">xp</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">4275.30</td>
+<td align="right">12436.13</td>
+<td align="right">0</td>
+<td align="right">100.0</td>
+<td align="right">450</td>
+<td align="right">2300</td>
+<td align="right">155000</td>
+<td align="left">▇▁▁▁▁</td>
+</tr>
+<tr class="odd">
+<td align="left">ac</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">14.07</td>
+<td align="right">3.27</td>
+<td align="right">5</td>
+<td align="right">12.0</td>
+<td align="right">13</td>
+<td align="right">17</td>
+<td align="right">25</td>
+<td align="left">▁▇▅▂▁</td>
+</tr>
+<tr class="even">
+<td align="left">hp_avg</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">82.31</td>
+<td align="right">99.88</td>
+<td align="right">1</td>
+<td align="right">18.0</td>
+<td align="right">45</td>
+<td align="right">114</td>
+<td align="right">676</td>
+<td align="left">▇▁▁▁▁</td>
+</tr>
+<tr class="odd">
+<td align="left">str</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">15.34</td>
+<td align="right">6.63</td>
+<td align="right">1</td>
+<td align="right">11.0</td>
+<td align="right">16</td>
+<td align="right">19</td>
+<td align="right">30</td>
+<td align="left">▂▃▇▃▂</td>
+</tr>
+<tr class="even">
+<td align="left">dex</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">12.61</td>
+<td align="right">3.22</td>
+<td align="right">1</td>
+<td align="right">10.0</td>
+<td align="right">13</td>
+<td align="right">15</td>
+<td align="right">28</td>
+<td align="left">▁▅▇▁▁</td>
+</tr>
+<tr class="odd">
+<td align="left">con</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">15.16</td>
+<td align="right">4.50</td>
+<td align="right">8</td>
+<td align="right">12.0</td>
+<td align="right">14</td>
+<td align="right">18</td>
+<td align="right">30</td>
+<td align="left">▇▇▅▂▁</td>
+</tr>
+<tr class="even">
+<td align="left">int</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">7.86</td>
+<td align="right">5.69</td>
+<td align="right">1</td>
+<td align="right">2.0</td>
+<td align="right">7</td>
+<td align="right">12</td>
+<td align="right">25</td>
+<td align="left">▇▅▃▂▁</td>
+</tr>
+<tr class="odd">
+<td align="left">wis</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">11.72</td>
+<td align="right">2.98</td>
+<td align="right">0</td>
+<td align="right">10.0</td>
+<td align="right">12</td>
+<td align="right">13</td>
+<td align="right">25</td>
+<td align="left">▁▅▇▁▁</td>
+</tr>
+<tr class="even">
+<td align="left">cha</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">9.79</td>
+<td align="right">5.76</td>
+<td align="right">0</td>
+<td align="right">5.0</td>
+<td align="right">8</td>
+<td align="right">14</td>
+<td align="right">30</td>
+<td align="left">▇▇▅▂▁</td>
+</tr>
+<tr class="odd">
+<td align="left">acrobatics</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">1.12</td>
+<td align="right">1.64</td>
+<td align="right">-5</td>
+<td align="right">0.0</td>
+<td align="right">1</td>
+<td align="right">2</td>
+<td align="right">9</td>
+<td align="left">▁▅▇▁▁</td>
+</tr>
+<tr class="even">
+<td align="left">animal_handling</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">0.66</td>
+<td align="right">1.49</td>
+<td align="right">-5</td>
+<td align="right">0.0</td>
+<td align="right">1</td>
+<td align="right">1</td>
+<td align="right">7</td>
+<td align="left">▁▁▇▁▁</td>
+</tr>
+<tr class="odd">
+<td align="left">arcana</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">-1.07</td>
+<td align="right">3.46</td>
+<td align="right">-5</td>
+<td align="right">-4.0</td>
+<td align="right">-2</td>
+<td align="right">1</td>
+<td align="right">18</td>
+<td align="left">▇▅▁▁▁</td>
+</tr>
+<tr class="even">
+<td align="left">athletics</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">2.55</td>
+<td align="right">3.48</td>
+<td align="right">-5</td>
+<td align="right">0.0</td>
+<td align="right">3</td>
+<td align="right">4</td>
+<td align="right">14</td>
+<td align="left">▂▆▇▂▁</td>
+</tr>
+<tr class="odd">
+<td align="left">deception</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">-0.11</td>
+<td align="right">3.37</td>
+<td align="right">-5</td>
+<td align="right">-3.0</td>
+<td align="right">-1</td>
+<td align="right">2</td>
+<td align="right">11</td>
+<td align="left">▇▅▃▂▁</td>
+</tr>
+<tr class="even">
+<td align="left">history</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">-1.05</td>
+<td align="right">3.46</td>
+<td align="right">-5</td>
+<td align="right">-4.0</td>
+<td align="right">-2</td>
+<td align="right">1</td>
+<td align="right">13</td>
+<td align="left">▇▅▂▁▁</td>
+</tr>
+<tr class="odd">
+<td align="left">insight</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">0.95</td>
+<td align="right">2.12</td>
+<td align="right">-5</td>
+<td align="right">0.0</td>
+<td align="right">1</td>
+<td align="right">1</td>
+<td align="right">10</td>
+<td align="left">▁▇▂▁▁</td>
+</tr>
+<tr class="even">
+<td align="left">intimidation</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">-0.35</td>
+<td align="right">2.94</td>
+<td align="right">-5</td>
+<td align="right">-3.0</td>
+<td align="right">-1</td>
+<td align="right">2</td>
+<td align="right">10</td>
+<td align="left">▇▅▃▁▁</td>
+</tr>
+<tr class="odd">
+<td align="left">investigation</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">-1.26</td>
+<td align="right">2.94</td>
+<td align="right">-5</td>
+<td align="right">-4.0</td>
+<td align="right">-2</td>
+<td align="right">1</td>
+<td align="right">7</td>
+<td align="left">▇▃▆▂▁</td>
+</tr>
+<tr class="even">
+<td align="left">medicine</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">0.68</td>
+<td align="right">1.55</td>
+<td align="right">-5</td>
+<td align="right">0.0</td>
+<td align="right">1</td>
+<td align="right">1</td>
+<td align="right">7</td>
+<td align="left">▁▁▇▁▁</td>
+</tr>
+<tr class="odd">
+<td align="left">nature</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">-1.26</td>
+<td align="right">2.93</td>
+<td align="right">-5</td>
+<td align="right">-4.0</td>
+<td align="right">-2</td>
+<td align="right">1</td>
+<td align="right">7</td>
+<td align="left">▇▃▆▂▁</td>
+</tr>
+<tr class="even">
+<td align="left">perception</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">2.87</td>
+<td align="right">4.02</td>
+<td align="right">-5</td>
+<td align="right">0.0</td>
+<td align="right">2</td>
+<td align="right">4</td>
+<td align="right">17</td>
+<td align="left">▂▇▃▁▁</td>
+</tr>
+<tr class="odd">
+<td align="left">performance</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">-0.36</td>
+<td align="right">2.94</td>
+<td align="right">-5</td>
+<td align="right">-3.0</td>
+<td align="right">-1</td>
+<td align="right">2</td>
+<td align="right">10</td>
+<td align="left">▇▅▃▁▁</td>
+</tr>
+<tr class="even">
+<td align="left">persuasion</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">-0.19</td>
+<td align="right">3.34</td>
+<td align="right">-5</td>
+<td align="right">-3.0</td>
+<td align="right">-1</td>
+<td align="right">2</td>
+<td align="right">16</td>
+<td align="left">▇▅▂▁▁</td>
+</tr>
+<tr class="odd">
+<td align="left">religion</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">-1.18</td>
+<td align="right">3.12</td>
+<td align="right">-5</td>
+<td align="right">-4.0</td>
+<td align="right">-2</td>
+<td align="right">1</td>
+<td align="right">15</td>
+<td align="left">▇▅▁▁▁</td>
+</tr>
+<tr class="even">
+<td align="left">sleight_of_hand</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">1.11</td>
+<td align="right">1.62</td>
+<td align="right">-5</td>
+<td align="right">0.0</td>
+<td align="right">1</td>
+<td align="right">2</td>
+<td align="right">9</td>
+<td align="left">▁▅▇▁▁</td>
+</tr>
+<tr class="odd">
+<td align="left">stealth</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">2.30</td>
+<td align="right">2.56</td>
+<td align="right">-5</td>
+<td align="right">0.0</td>
+<td align="right">2</td>
+<td align="right">4</td>
+<td align="right">10</td>
+<td align="left">▁▇▇▃▁</td>
+</tr>
+<tr class="even">
+<td align="left">survival</td>
+<td align="right">0</td>
+<td align="right">1</td>
+<td align="right">0.70</td>
+<td align="right">1.54</td>
+<td align="right">-5</td>
+<td align="right">0.0</td>
+<td align="right">1</td>
+<td align="right">1</td>
+<td align="right">7</td>
+<td align="left">▁▁▇▁▁</td>
+</tr>
+</tbody>
+</table>
+<p>Because it’s an R crime to introduce a new data set without a ggplot, here we can see the relationship between strength and constitution, faceted by monster size:</p>
+<pre class="r"><code>monsters %&gt;% 
+    ggplot(aes(x = str, y = con)) + 
+    geom_point() + 
+    facet_wrap(. ~ size, nrow = 2)</code></pre>
+<p><img src="{{< blogdown/postref >}}index_files/figure-html/monster_ggplot-1.png" width="672" /></p>
+<p>One note before we go on: “monster” is a generic term. This data set contains bandits which, while of questionable moral character, are not necessarily monstrous. You can also find a simple frog in this data set, capable of nothing more than a ribbit. We refer to them all as “monsters”, perhaps unfairly!</p>
+</div>
+<div id="scraping-line-by-line" class="section level2">
+<h2>Scraping line-by-line</h2>
+<p>Let’s take the Medusa <code>monster</code> above, loaded as a single string. I’m going to make life easier for myself by separating the string into lines. At first I tried to do this myself with <code>strsplit</code>, but please take my advice: use the <code>stringi</code> package. You’ll notice that I turn the resulting list into a single-column tibble. I won’t lie: I find manipulating lists directly difficult, so being able to use <code>dplyr</code> verbs makes me happy. I’m also going to remove the italics (represented in markdown by underscores) since I won’t need them here.</p>
+<pre class="r"><code>lines &lt;- monster %&gt;% 
+        stringi::stri_split_lines(omit_empty = TRUE) %&gt;% 
+        unlist %&gt;% 
+        as_tibble %&gt;% # much easier to deal with than lists
+        mutate_all(trimws) %&gt;% 
+        mutate_all(function(x) gsub(&quot;_&quot;, &quot;&quot;, x)) # remove italics
+print(lines, n = nrow(lines))</code></pre>
+<pre><code>## # A tibble: 23 x 1
+##    value                                                                        
+##    &lt;chr&gt;                                                                        
+##  1 name: Medusa                                                                 
+##  2 type: monstrosity                                                            
+##  3 cr: 6                                                                        
+##  4 # Medusa                                                                     
+##  5 Medium monstrosity, lawful evil                                              
+##  6 **Armor Class** 15 (natural armor)                                           
+##  7 **Hit Points** 127 (17d8 + 51)                                               
+##  8 **Speed** 30 ft.                                                             
+##  9 | STR     | DEX     | CON     | INT     | WIS     | CHA     |                
+## 10 |---------|---------|---------|---------|---------|---------|                
+## 11 | 10 (+0) | 15 (+2) | 16 (+3) | 12 (+1) | 13 (+1) | 15 (+2) |                
+## 12 **Skills** Deception +5, Insight +4, Perception +4, Stealth +5               
+## 13 **Senses** darkvision 60 ft., passive Perception 14                          
+## 14 **Languages** Common                                                         
+## 15 **Challenge** 6 (2,300 XP)                                                   
+## 16 **Petrifying Gaze.** When a creature that can see the medusa&#39;s eyes starts i…
+## 17 Unless surprised, a creature can avert its eyes to avoid the saving throw at…
+## 18 If the medusa sees itself reflected on a polished surface within 30 feet of …
+## 19 ### Actions                                                                  
+## 20 **Multiattack.** The medusa makes either three melee attacks--one with its s…
+## 21 **Snake Hair.** Melee Weapon Attack: +5 to hit, reach 5 ft., one creature. H…
+## 22 **Shortsword.** Melee Weapon Attack: +5 to hit, reach 5 ft., one target. Hit…
+## 23 **Longbow.** Ranged Weapon Attack: +5 to hit, range 150/600 ft., one target.…</code></pre>
+</div>
+<div id="scraping-monster-name-type-and-cr" class="section level2">
+<h2>Scraping monster name, type and CR</h2>
+<p>The wonderful thing about these markdown files is that they have a nifty couple of lines up the top listing the name, type and challenge rating (cr) of the monster. These are marked by headings with colons, so we’ll define a function to extract the data based on that.</p>
+<pre class="r"><code>extract_from_colon_heading &lt;- function(lines, heading) {
+    lines %&gt;% 
+        filter(grepl(paste0(heading, &quot;:&quot;), value)) %&gt;% 
+        gsub(paste0(heading, &quot;:&quot;), &quot;&quot;, .) %&gt;% 
+        as.character %&gt;% 
+        trimws
+}
+
+c(
+    extract_from_colon_heading(lines, &quot;name&quot;),
+    extract_from_colon_heading(lines, &quot;type&quot;),
+    extract_from_colon_heading(lines, &quot;cr&quot;)
+)</code></pre>
+<pre><code>## [1] &quot;Medusa&quot;      &quot;monstrosity&quot; &quot;6&quot;</code></pre>
+<p>I should offer some explanations for those new to D&amp;D! The “type” of a monster is a category like beast, undead or—in the case of the Medusa—monstrosity. The challenge rating is a rough measure of difficulty. The Medusa has a challenge rating of 6, so is a suitable encounter for 4 players with characters of level 6. Characters begin at level 1 and move up to level 20 (if the campaign lasts that long).</p>
+</div>
+<div id="scraping-based-on-bold-text" class="section level2">
+<h2>Scraping based on bold text</h2>
+<p>Most of the information we need is labelled by bold text, represented in markdown by double asterisks. We’ll define three functions:</p>
+<ol style="list-style-type: decimal">
+<li><code>identify_bold_text</code> looks for a given <code>bold_text</code> in a string <code>x</code>, and returns a Boolean value.</li>
+<li><code>strip_bold_text</code> removes <em>all</em> bolded text from a string <code>x</code>, and trims white space from either end of the result.</li>
+<li><code>extract_from_bold_text</code> looks through a list of lines (like the <code>lines</code> defined above) for a particular <code>bold_text</code>. It will return all text in the string <em>except</em> the <code>bold_text</code>. This function uses the two above.</li>
+</ol>
+<pre class="r"><code>identify_bold_text &lt;- function(x, bold_text) {
+    grepl(paste0(&quot;\\*\\*&quot;, bold_text, &quot;\\*\\*&quot;), x, ignore.case = TRUE)
+}
+
+strip_bold_text &lt;- function(x) {
+    gsub(&quot;\\*\\*(.*?)\\*\\*&quot;, &quot;&quot;, x, ignore.case = TRUE) %&gt;% trimws
+}
+
+extract_from_bold_text &lt;- function(lines, bold_text) {
+    lines %&gt;% 
+        filter(identify_bold_text(value, bold_text)) %&gt;% 
+        as.character %&gt;% 
+        strip_bold_text
+}
+
+extract_from_bold_text(lines, &quot;Languages&quot;)</code></pre>
+<pre><code>## [1] &quot;Common&quot;</code></pre>
+</div>
+<div id="scraping-based-on-brackets" class="section level2">
+<h2>Scraping based on brackets</h2>
+<p>Some of the data we need is found in bracketed information. The <code>extract_bracketed</code> function returns all text inside the first set of brackets found in a string <code>x</code>, or returns <code>NA</code> if no bracketed text is found.</p>
+<pre class="r"><code>extract_bracketed &lt;- function(x) {
+    if (!grepl(&quot;\\(.*\\)&quot;, x)) {
+        return(NA)
+    } else {
+        gsub(&quot;.*\\((.*?)\\).*&quot;, &quot;\\1&quot;, x)
+    }
+}
+
+lines %&gt;% extract_from_bold_text(&quot;Armor Class&quot;) %&gt;% extract_bracketed</code></pre>
+<pre><code>## [1] &quot;natural armor&quot;</code></pre>
+<p>A monster’s armor class (AC) determines how hard it is to hit the creature with a weapon or certain spells. The Medusa has an AC of 15. To attack the Medusa, a player will roll a 20-sided die (d20) and add certain modifiers based on their character’s skills and proficiencies. If the result is at least 15, the attack hits. The “natural armor” note means that the Medusa’s armor class is provided by thickened skin or scales, and not a separate piece of armour.</p>
+</div>
+<div id="abilities" class="section level2">
+<h2>Abilities</h2>
+<p>Player characters and monsters in D&amp;D have six ability scores that influence almost everything that they do: strength, dexterity, constitution, intelligence, wisdom and charisma. These abilities are represented by numeric scores that usually (but not always) fall between 10 and 20, with 10 being “average” and 20 being superb.</p>
+<p>In the markdown files, these ability scores are tables. We look for the table header and find the ability scores two rows below.</p>
+<pre class="r"><code>ability_header &lt;- min(which(grepl(&quot;\\| STR&quot;, lines$value), arr.ind = TRUE))
+ability_text &lt;- lines$value[ability_header + 2]
+ability_vector &lt;- ability_text %&gt;% strsplit(&quot;\\|&quot;) %&gt;% unlist
+monster_ability &lt;- readr::parse_number(ability_vector[!(ability_vector == &quot;&quot;)])
+names(monster_ability) &lt;- c(&quot;STR&quot;, &quot;DEX&quot;, &quot;CON&quot;, &quot;INT&quot;, &quot;WIS&quot;, &quot;CHA&quot;)
+monster_ability    </code></pre>
+<pre><code>## STR DEX CON INT WIS CHA 
+##  10  15  16  12  13  15</code></pre>
+</div>
+<div id="skills" class="section level2">
+<h2>Skills</h2>
+<p>Skills represent the monster’s ability to perform activities. There are 18 skills, and each skill is associated with one of the 6 ability scores.</p>
+<pre class="r"><code>skill_ability &lt;- tribble(
+~skill, ~ability_code_upper,
+#-------|------------------
+&quot;athletics&quot;, &quot;STR&quot;,
+&quot;acrobatics&quot;, &quot;DEX&quot;,
+&quot;sleight_of_hand&quot;, &quot;DEX&quot;,
+&quot;stealth&quot;, &quot;DEX&quot;,
+&quot;arcana&quot;, &quot;INT&quot;,
+&quot;history&quot;, &quot;INT&quot;,
+&quot;investigation&quot;, &quot;INT&quot;,
+&quot;nature&quot;, &quot;INT&quot;,
+&quot;religion&quot;, &quot;INT&quot;,
+&quot;animal_handling&quot;, &quot;WIS&quot;,
+&quot;insight&quot;, &quot;WIS&quot;,
+&quot;medicine&quot;, &quot;WIS&quot;,
+&quot;perception&quot;, &quot;WIS&quot;,
+&quot;survival&quot;, &quot;WIS&quot;,
+&quot;deception&quot;, &quot;CHA&quot;,
+&quot;intimidation&quot;, &quot;CHA&quot;,
+&quot;performance&quot;, &quot;CHA&quot;,
+&quot;persuasion&quot;, &quot;CHA&quot;,
+)</code></pre>
+<p>All skills begin with a roll of a d20 for an element of chance. Modifiers, which can be negative, are then added to the result to determine how well the monster did. The Medusa has a +5 bonus to Deception, which would be added to the roll.</p>
+<p>If a skill isn’t listed in the Medusa’s stat block, she can still use it. In this case, she would rely instead on her ability scores. For example, the Medusa isn’t trained in acrobatics, but her high dexterity would give her a slight advantage nevertheless.</p>
+<p>Modifiers can be calculated from ability scores with a simple formula, defined below. Note that modifiers can be negative. Zombies, for example, are not known for their high intelligence, and have a history modifier of -4.</p>
+<pre class="r"><code>modifier &lt;- function(x) {
+    floor((x - 10) / 2)
+}
+
+monster_modifiers &lt;- monster_ability %&gt;% 
+    as.list %&gt;% # preserves list names as column names
+    as_tibble %&gt;% 
+    mutate_all(modifier) %&gt;% # convert raw ability to modifiers
+    gather(key = ability_code_upper, value = modifier) # convert to long
+monster_modifiers</code></pre>
+<pre><code>## # A tibble: 6 x 2
+##   ability_code_upper modifier
+##   &lt;chr&gt;                 &lt;dbl&gt;
+## 1 STR                       0
+## 2 DEX                       2
+## 3 CON                       3
+## 4 INT                       1
+## 5 WIS                       1
+## 6 CHA                       2</code></pre>
+<p>We’re going to list every skill modifier for each monster. We start with the <code>base_skills</code>, determined solely by the monster’s ability scores.</p>
+<pre class="r"><code>base_skills &lt;- skill_ability %&gt;% 
+    left_join(monster_modifiers, by = &quot;ability_code_upper&quot;) %&gt;% 
+    select(skill, modifier)
+head(base_skills, 6)</code></pre>
+<pre><code>## # A tibble: 6 x 2
+##   skill           modifier
+##   &lt;chr&gt;              &lt;dbl&gt;
+## 1 athletics              0
+## 2 acrobatics             2
+## 3 sleight_of_hand        2
+## 4 stealth                2
+## 5 arcana                 1
+## 6 history                1</code></pre>
+<p>Now we find the <code>listed_skills</code>, which are those explicitly provided in the markdown. We use the <code>extract_from_bold_text</code> function, and split the resulting line along the commas into a vector. The words in an element name the skill, while the number gives the modifier.</p>
+<p>This chain of piped functions has a peculiar <code>unlist %&gt;% as.list</code>, which seems to be necessary to preserve the vector names. I’d love to do without this code, since it seems very ugly!</p>
+<pre class="r"><code>listed_skills &lt;- lines %&gt;% 
+    extract_from_bold_text(&quot;Skills&quot;) %&gt;% 
+    strsplit(&quot;, &quot;) %&gt;% 
+        unlist %&gt;%  
+        lapply(function(x) {
+            skill_name &lt;- word(x)
+            skill_modifier &lt;- c(readr::parse_number(x))
+            names(skill_modifier) &lt;- tolower(skill_name)
+            skill_modifier
+        }) %&gt;% 
+        unlist %&gt;% # This is 
+        as.list %&gt;% # so weird
+        as_tibble %&gt;% 
+        gather(key = skill, value = modifier) %&gt;% 
+        mutate(skill = gsub(&quot; &quot;, &quot;_&quot;, skill)) # keep naming conventions (underscores)
+listed_skills</code></pre>
+<pre><code>## # A tibble: 4 x 2
+##   skill      modifier
+##   &lt;chr&gt;         &lt;dbl&gt;
+## 1 deception         5
+## 2 insight           4
+## 3 perception        4
+## 4 stealth           5</code></pre>
+<p>Finally, we combine <code>listed_skills</code> and <code>base_skills</code>, allowing listed skills to override base skills.</p>
+<pre class="r"><code>monster_skills &lt;- if (length(listed_skills) == 0) {
+    base_skills
+} else {
+    listed_skills %&gt;% rbind(
+        anti_join(base_skills, listed_skills, by = &quot;skill&quot;)
+    )
+}
+monster_skills &lt;- monster_skills[match(base_skills$skill, monster_skills$skill),] # maintain skill order
+head(monster_skills, 6)</code></pre>
+<pre><code>## # A tibble: 6 x 2
+##   skill           modifier
+##   &lt;chr&gt;              &lt;dbl&gt;
+## 1 athletics              0
+## 2 acrobatics             2
+## 3 sleight_of_hand        2
+## 4 stealth                5
+## 5 arcana                 1
+## 6 history                1</code></pre>
+</div>
+<div id="monster-actions" class="section level2">
+<h2>Monster actions</h2>
+<p>Actions are are a tough one. Take a look at the last 5 lines of the markdown:</p>
+<pre class="r"><code>tail(lines, 5)</code></pre>
+<pre><code>## # A tibble: 5 x 1
+##   value                                                                         
+##   &lt;chr&gt;                                                                         
+## 1 ### Actions                                                                   
+## 2 **Multiattack.** The medusa makes either three melee attacks--one with its sn…
+## 3 **Snake Hair.** Melee Weapon Attack: +5 to hit, reach 5 ft., one creature. Hi…
+## 4 **Shortsword.** Melee Weapon Attack: +5 to hit, reach 5 ft., one target. Hit:…
+## 5 **Longbow.** Ranged Weapon Attack: +5 to hit, range 150/600 ft., one target. …</code></pre>
+<p>We’re going to look for an actions h3 heading (three hashes) “Actions”. The lines that correspond to actions begin after this <code>Actions</code> subheading. The last action is determined by finding either:</p>
+<ol style="list-style-type: decimal">
+<li>the line before the next h3 heading or, failing that,</li>
+<li>the last line.</li>
+</ol>
+<p>We then have a list of lines that correspond to monster actions. We’re going to turn these lines into a named vector, in which the name of the action (taken from the bold text) corresponds to the action text.</p>
+<pre class="r"><code>header_rows &lt;- which(grepl(&quot;###&quot;, lines$value), arr.ind = TRUE)
+    actions_header_row &lt;- which(lines == &quot;### Actions&quot;, arr.ind = TRUE)[,&quot;row&quot;]
+    if (length(actions_header_row) == 0) { # This monster has no actions
+        monster_actions &lt;- NA
+    } else {
+        if (max(header_rows) == actions_header_row) {
+            last_action = nrow(lines) # in this case, the actions are the last lines
+        } else {
+            last_action &lt;-  min(header_rows[header_rows &gt; actions_header_row]) - 1 # the row before the heading that comes after ### Actions
+        }
+        action_rows &lt;-  seq(actions_header_row + 1, last_action)
+        monster_actions &lt;- lines$value[action_rows]
+        monster_actions &lt;- monster_actions %&gt;% purrr::map(function(x) {
+            action_name &lt;- gsub(&quot;.*\\*\\*(.*?)\\.\\*\\*.*&quot;, &quot;\\1&quot;, x)
+            action &lt;- x %&gt;% strip_bold_text %&gt;% trimws
+            names(action) &lt;- action_name
+            action
+        }) %&gt;% purrr::reduce(c)
+    }
+monster_actions</code></pre>
+<pre><code>##                                                                                                                                 Multiattack 
+## &quot;The medusa makes either three melee attacks--one with its snake hair and two with its shortsword--or two ranged attacks with its longbow.&quot; 
+##                                                                                                                                  Snake Hair 
+##                  &quot;Melee Weapon Attack: +5 to hit, reach 5 ft., one creature. Hit: 4 (1d4 + 2) piercing damage plus 14 (4d6) poison damage.&quot; 
+##                                                                                                                                  Shortsword 
+##                                                &quot;Melee Weapon Attack: +5 to hit, reach 5 ft., one target. Hit: 5 (1d6 + 2) piercing damage.&quot; 
+##                                                                                                                                     Longbow 
+##              &quot;Ranged Weapon Attack: +5 to hit, range 150/600 ft., one target. Hit: 6 (1d8 + 2) piercing damage plus 7 (2d6) poison damage.&quot;</code></pre>
+</div>
+<div id="putting-it-all-together" class="section level2">
+<h2>Putting it all together</h2>
+<p>We can now put everything together into a single-row tibble:</p>
+<pre class="r"><code>tibble(
+    name = lines %&gt;% extract_from_colon_heading(&quot;name&quot;),
+    type = lines %&gt;% extract_from_colon_heading(&quot;type&quot;),
+    cr = lines %&gt;% extract_from_colon_heading(&quot;cr&quot;) %&gt;% as.numeric,
+    xp = lines %&gt;% extract_from_bold_text(&quot;challenge&quot;) %&gt;% extract_bracketed %&gt;% readr::parse_number(),
+    ac = lines %&gt;% extract_from_bold_text(&quot;Armor Class&quot;) %&gt;% readr::parse_number(),
+    ac_note = lines %&gt;% extract_from_bold_text(&quot;Armor Class&quot;) %&gt;% extract_bracketed,
+    hp_avg = lines %&gt;% extract_from_bold_text(&quot;Hit Points&quot;) %&gt;% readr::parse_number(),
+    hp = lines %&gt;% extract_from_bold_text(&quot;Hit Points&quot;) %&gt;% extract_bracketed,
+    str = monster_ability[&quot;STR&quot;],
+    dex = monster_ability[&quot;DEX&quot;],
+    con = monster_ability[&quot;CON&quot;],
+    int = monster_ability[&quot;INT&quot;],
+    wis = monster_ability[&quot;WIS&quot;],
+    cha = monster_ability[&quot;CHA&quot;],
+    senses = lines %&gt;% extract_from_bold_text(&quot;Senses&quot;),
+    languages = lines %&gt;% extract_from_bold_text(&quot;Languages&quot;),
+    speed = lines %&gt;% extract_from_bold_text(&quot;Speed&quot;),
+    actions = monster_actions %&gt;% list
+    ) %&gt;% 
+    cbind(spread(monster_skills, skill, modifier)) %&gt;% 
+    as_tibble</code></pre>
+<pre><code>## # A tibble: 1 x 36
+##   name   type       cr    xp    ac ac_note  hp_avg hp      str   dex   con   int
+##   &lt;chr&gt;  &lt;chr&gt;   &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;chr&gt;     &lt;dbl&gt; &lt;chr&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+## 1 Medusa monstr…     6  2300    15 natural…    127 17d8…    10    15    16    12
+## # … with 24 more variables: wis &lt;dbl&gt;, cha &lt;dbl&gt;, senses &lt;chr&gt;,
+## #   languages &lt;chr&gt;, speed &lt;chr&gt;, actions &lt;list&gt;, acrobatics &lt;dbl&gt;,
+## #   animal_handling &lt;dbl&gt;, arcana &lt;dbl&gt;, athletics &lt;dbl&gt;, deception &lt;dbl&gt;,
+## #   history &lt;dbl&gt;, insight &lt;dbl&gt;, intimidation &lt;dbl&gt;, investigation &lt;dbl&gt;,
+## #   medicine &lt;dbl&gt;, nature &lt;dbl&gt;, perception &lt;dbl&gt;, performance &lt;dbl&gt;,
+## #   persuasion &lt;dbl&gt;, religion &lt;dbl&gt;, sleight_of_hand &lt;dbl&gt;, stealth &lt;dbl&gt;,
+## #   survival &lt;dbl&gt;</code></pre>
+<p>There are a few more fields that I haven’t covered here (size, alignment and description, for example). I’ve put the full version of the <code>parse_monster.R</code> script in a <a href="https://gist.github.com/mdneuzerling/1a70a2da97300c478186aba226053595">gist</a>.</p>
+<p>Of course, this is how to parse just one monster. Fortunately, the <code>purrr</code> package exists. Here’s how to scrape every monster:</p>
+<ol style="list-style-type: decimal">
+<li>Clone <a href="https://github.com/vitusventure/5thSRD">vitusventure’s 5th edition SRD repository</a></li>
+<li>Set the <code>/docs/gamemaster_rules/monsters</code> directory to a variable <code>monster_dir</code></li>
+<li>Run the following code:</li>
+</ol>
+<pre class="r"><code>monsters &lt;- list.files(monster_dir, full.names = TRUE) %&gt;% 
+    purrr::map(function(x) readChar(x, file.info(x)$size)) %&gt;% # read files as strings
+    purrr::map(parse_monster) %&gt;% 
+    purrr::reduce(rbind)</code></pre>
+</div>
+<div id="whats-next" class="section level2">
+<h2>What’s next</h2>
+<p>A few things are missing here:</p>
+<ul>
+<li>Damage/condition immunities and resistances are not being scraped.</li>
+<li>Monster traits, such as the ability to breathe underwater, are not being scraped. I think this is a matter of finding any bold heading that isn’t “standard” and treating it as a trait.</li>
+<li>Some monsters have complicated armor classes. For example, the werewolf has an AC of “11 in humanoid form, 12 (natural armor) in wolf or hybrid form”. This doesn’t fit the template of <code>ac</code> and <code>ac_note</code>.</li>
+</ul>
+<p>I’d like to incorporate the spells in the SRD, as well as some basic mechanics. Imagine being able to generate an encounter in R according to a specific party level!</p>
+</div>
+<div id="sources" class="section level2">
+<h2>Sources</h2>
+<p>The Medusa and all Dungeons and Dragons 5th edition mechanics are available in the <a href="https://media.wizards.com/2016/downloads/DND/SRD-OGL_V5.1.pdf">Systems Reference Document under the Open Gaming License Version 1.0a</a>. The <code>monsters</code> data set in the <code>monstr</code> package is available under the same license.</p>
+<hr />
+<pre class="r"><code>devtools::session_info()</code></pre>
+<pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
+##  setting  value                       
+##  version  R version 4.1.0 (2021-05-18)
+##  os       macOS Big Sur 11.3          
+##  system   aarch64, darwin20           
+##  ui       X11                         
+##  language (EN)                        
+##  collate  en_AU.UTF-8                 
+##  ctype    en_AU.UTF-8                 
+##  tz       Australia/Melbourne         
+##  date     2021-05-30                  
+## 
+## ─ Packages ───────────────────────────────────────────────────────────────────
+##  package     * version    date       lib source                              
+##  assertthat    0.2.1      2019-03-21 [1] CRAN (R 4.1.0)                      
+##  backports     1.2.1      2020-12-09 [1] CRAN (R 4.1.0)                      
+##  base64enc     0.1-3      2015-07-28 [1] CRAN (R 4.1.0)                      
+##  blogdown      1.3        2021-04-14 [1] CRAN (R 4.1.0)                      
+##  bookdown      0.22       2021-04-22 [1] CRAN (R 4.1.0)                      
+##  broom         0.7.6      2021-04-05 [1] CRAN (R 4.1.0)                      
+##  bslib         0.2.5.1    2021-05-18 [1] CRAN (R 4.1.0)                      
+##  cachem        1.0.4      2021-02-13 [1] CRAN (R 4.1.0)                      
+##  callr         3.7.0      2021-04-20 [1] CRAN (R 4.1.0)                      
+##  cellranger    1.1.0      2016-07-27 [1] CRAN (R 4.1.0)                      
+##  cli           2.5.0      2021-04-26 [1] CRAN (R 4.1.0)                      
+##  colorspace    2.0-1      2021-05-04 [1] CRAN (R 4.1.0)                      
+##  crayon        1.4.1      2021-02-08 [1] CRAN (R 4.1.0)                      
+##  DBI           1.1.1      2021-01-15 [1] CRAN (R 4.1.0)                      
+##  dbplyr        2.1.1      2021-04-06 [1] CRAN (R 4.1.0)                      
+##  desc          1.3.0      2021-03-05 [1] CRAN (R 4.1.0)                      
+##  devtools      2.4.0      2021-04-07 [1] CRAN (R 4.1.0)                      
+##  digest        0.6.27     2020-10-24 [1] CRAN (R 4.1.0)                      
+##  dplyr       * 1.0.5      2021-03-05 [1] CRAN (R 4.1.0)                      
+##  ellipsis      0.3.2      2021-04-29 [1] CRAN (R 4.1.0)                      
+##  evaluate      0.14       2019-05-28 [1] CRAN (R 4.1.0)                      
+##  fansi         0.4.2      2021-01-15 [1] CRAN (R 4.1.0)                      
+##  farver        2.1.0      2021-02-28 [1] CRAN (R 4.1.0)                      
+##  fastmap       1.1.0      2021-01-25 [1] CRAN (R 4.1.0)                      
+##  forcats     * 0.5.1      2021-01-27 [1] CRAN (R 4.1.0)                      
+##  fs            1.5.0      2020-07-31 [1] CRAN (R 4.1.0)                      
+##  generics      0.1.0      2020-10-31 [1] CRAN (R 4.1.0)                      
+##  ggplot2     * 3.3.3      2020-12-30 [1] CRAN (R 4.1.0)                      
+##  glue          1.4.2      2020-08-27 [1] CRAN (R 4.1.0)                      
+##  gtable        0.3.0      2019-03-25 [1] CRAN (R 4.1.0)                      
+##  haven         2.4.1      2021-04-23 [1] CRAN (R 4.1.0)                      
+##  highr         0.9        2021-04-16 [1] CRAN (R 4.1.0)                      
+##  hms           1.0.0      2021-01-13 [1] CRAN (R 4.1.0)                      
+##  htmltools     0.5.1.1    2021-01-22 [1] CRAN (R 4.1.0)                      
+##  httr          1.4.2      2020-07-20 [1] CRAN (R 4.1.0)                      
+##  jquerylib     0.1.4      2021-04-26 [1] CRAN (R 4.1.0)                      
+##  jsonlite      1.7.2      2020-12-09 [1] CRAN (R 4.1.0)                      
+##  knitr         1.33       2021-04-24 [1] CRAN (R 4.1.0)                      
+##  labeling      0.4.2      2020-10-20 [1] CRAN (R 4.1.0)                      
+##  lifecycle     1.0.0      2021-02-15 [1] CRAN (R 4.1.0)                      
+##  lubridate     1.7.10     2021-02-26 [1] CRAN (R 4.1.0)                      
+##  magrittr      2.0.1      2020-11-17 [1] CRAN (R 4.1.0)                      
+##  memoise       2.0.0      2021-01-26 [1] CRAN (R 4.1.0)                      
+##  modelr        0.1.8      2020-05-19 [1] CRAN (R 4.1.0)                      
+##  monstr        0.0.0.9000 2021-05-30 [1] Github (mdneuzerling/monstr@dc7e102)
+##  munsell       0.5.0      2018-06-12 [1] CRAN (R 4.1.0)                      
+##  pillar        1.6.1      2021-05-16 [1] CRAN (R 4.1.0)                      
+##  pkgbuild      1.2.0      2020-12-15 [1] CRAN (R 4.1.0)                      
+##  pkgconfig     2.0.3      2019-09-22 [1] CRAN (R 4.1.0)                      
+##  pkgload       1.2.1      2021-04-06 [1] CRAN (R 4.1.0)                      
+##  prettyunits   1.1.1      2020-01-24 [1] CRAN (R 4.1.0)                      
+##  processx      3.5.2      2021-04-30 [1] CRAN (R 4.1.0)                      
+##  ps            1.6.0      2021-02-28 [1] CRAN (R 4.1.0)                      
+##  purrr       * 0.3.4      2020-04-17 [1] CRAN (R 4.1.0)                      
+##  R6            2.5.0      2020-10-28 [1] CRAN (R 4.1.0)                      
+##  Rcpp          1.0.6      2021-01-15 [1] CRAN (R 4.1.0)                      
+##  readr       * 1.4.0      2020-10-05 [1] CRAN (R 4.1.0)                      
+##  readxl        1.3.1      2019-03-13 [1] CRAN (R 4.1.0)                      
+##  remotes       2.3.0      2021-04-01 [1] CRAN (R 4.1.0)                      
+##  repr          1.1.3      2021-01-21 [1] CRAN (R 4.1.0)                      
+##  reprex        2.0.0      2021-04-02 [1] CRAN (R 4.1.0)                      
+##  rlang         0.4.11     2021-04-30 [1] CRAN (R 4.1.0)                      
+##  rmarkdown     2.8        2021-05-07 [1] CRAN (R 4.1.0)                      
+##  rprojroot     2.0.2      2020-11-15 [1] CRAN (R 4.1.0)                      
+##  rstudioapi    0.13       2020-11-12 [1] CRAN (R 4.1.0)                      
+##  rvest         1.0.0      2021-03-09 [1] CRAN (R 4.1.0)                      
+##  sass          0.4.0      2021-05-12 [1] CRAN (R 4.1.0)                      
+##  scales        1.1.1      2020-05-11 [1] CRAN (R 4.1.0)                      
+##  sessioninfo   1.1.1      2018-11-05 [1] CRAN (R 4.1.0)                      
+##  skimr         2.1.3      2021-03-07 [1] CRAN (R 4.1.0)                      
+##  stringi       1.6.1      2021-05-10 [1] CRAN (R 4.1.0)                      
+##  stringr     * 1.4.0      2019-02-10 [1] CRAN (R 4.1.0)                      
+##  testthat      3.0.2      2021-02-14 [1] CRAN (R 4.1.0)                      
+##  tibble      * 3.1.2      2021-05-16 [1] CRAN (R 4.1.0)                      
+##  tidyr       * 1.1.3      2021-03-03 [1] CRAN (R 4.1.0)                      
+##  tidyselect    1.1.1      2021-04-30 [1] CRAN (R 4.1.0)                      
+##  tidyverse   * 1.3.1      2021-04-15 [1] CRAN (R 4.1.0)                      
+##  usethis       2.0.1      2021-02-10 [1] CRAN (R 4.1.0)                      
+##  utf8          1.2.1      2021-03-12 [1] CRAN (R 4.1.0)                      
+##  vctrs         0.3.8      2021-04-29 [1] CRAN (R 4.1.0)                      
+##  withr         2.4.2      2021-04-18 [1] CRAN (R 4.1.0)                      
+##  xfun          0.22       2021-03-11 [1] CRAN (R 4.1.0)                      
+##  xml2          1.3.2      2020-04-23 [1] CRAN (R 4.1.0)                      
+##  yaml          2.2.1      2020-02-01 [1] CRAN (R 4.1.0)                      
+## 
+## [1] /Library/Frameworks/R.framework/Versions/4.1-arm64/Resources/library</code></pre>
+</div>
+</div>

@@ -1,0 +1,223 @@
+---
+title: Data Science Workflows
+author: ~
+date: '2020-07-19'
+slug: data-science-workflows
+tags:
+    - R
+images: ["/img/gears.jpg"]
+featuredalt: Three interlocking metal gears
+
+---
+
+<script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
+
+
+<p>I’m obsessed with how to structure a data science project. The time I spend worrying about project structure would be better spent on actually writing code. Here’s my preferred R workflow, and a few notes on Python as well.</p>
+<div id="the-r-package-workflow" class="section level1">
+<h1>The R package workflow</h1>
+<p>In R, the package is <a href="http://r-pkgs.had.co.nz/intro.html">“the fundamental unit of shareable code”</a>.</p>
+<p>At rstudio::conf 2020, Hadley gave a rule of thumb for when to create a package, which I’ll paraphrase: “When you copy and paste a block of code three times, make a function. When you do that three times, make a package.” My rule of thumb is stricter: if I might come back to this project tomorrow, it should be a package. I’m a big fan of this workflow, and I use it for just about everything.</p>
+<p>People have told me that making a package seems like a massive learning curve. That’s fair. Packages look strange from the outside, with a whole bunch of bizarre files. Code is lumped together into a single directory, except for the stuff in <code>inst/</code>, and it’s hard to tell what’s going on with <code>inst/</code>. Imagine being an R novice, and trying to find the code for your favourite function somewhere in a git repository. This stuff <em>is</em> hard, but there are tools out there that make the rewards greater than the costs.</p>
+<div id="packages-are-just-a-way-to-organise-code" class="section level3">
+<h3>Packages are just a way to organise code</h3>
+<p>First things first: R packages exist independently of CRAN. The packages I make are specific to a project, and often specific to a single data set. They’re never going to be submitted to CRAN. Most don’t even make it onto GitHub. R packages can be just a way to organise code, nothing more. By following a certain structure and a few rules we get to benefit from a whole bunch of tools designed just for packages.</p>
+<p>Package structure is thoroughly explained in <a href="http://r-pkgs.had.co.nz/package.html">Hadley’s book</a>, but here are the simplified requirements:</p>
+<ul>
+<li>All function code goes in R files in the <code>R/</code> directory. The functions in here will be available when the package is loaded.</li>
+<li>Unit tests go in the <code>tests/</code> directory.</li>
+<li>Package metadata goes in the <code>DESCRIPTION</code> file.</li>
+<li>There’s a <code>NAMESPACE</code> file and a <code>man/</code> directory, but these can be ignored; they’re generated automatically from Roxygen strings.</li>
+<li>There’s a LICENSE file for the licence under which the package is released (if it is released).</li>
+<li>Everything else — exploratory analysis, stray bits of code, R markdown, or anything that isn’t mentioned above — goes into the <code>inst/</code> directory.</li>
+</ul>
+</div>
+<div id="the-tricky-parts-of-package-development-are-automated" class="section level3">
+<h3>The tricky parts of package development are automated</h3>
+<p>Most of the intricacies of package development can be outsourced to <code>devtools</code> and <code>usethis</code>. I never have to think about how to set up the structure of a package: I type <code>usethis::create_package("packagename")</code> and it’s all set up for me. I never have to think about where to stick my test files: <code>usethis::create_test("file-name")</code> does it for me. The LICENSE requirement is a bit annoying, but <code>usethis::use_mit_license()</code> can immediately set me up with a permissive licence.<a href="#fn1" class="footnote-ref" id="fnref1"><sup>1</sup></a></p>
+<p>Maybe the end result of my project is an R Markdown report. Instead of filling the R Markdown file with helper functions, I put all of those functions in files in the <code>R/</code> directory. I put my R Markdown file in the <code>inst/</code> directory, and in it I load the functions of the package. I don’t even need to install the package: I can use <code>devtools::load_all()</code> to make all of those functions available to me.</p>
+<p>I’ll repeat that: <strong>a package workflow can be used without ever installing the package</strong>. For almost all personal packages, <code>devtools::load_all()</code> is good enough.</p>
+</div>
+<div id="the-benefits-of-a-package-workflow-outweigh-the-extra-effort" class="section level3">
+<h3>The benefits of a package workflow outweigh the extra effort</h3>
+<p>A package structure does require a bit more thought, but what you get in return makes it worthwhile. In exchange for following the structure and the rules, I get:</p>
+<ul>
+<li>A very clear set of dependencies for my project. I have to declare which packages I’m using in my package (shortcut: <code>usethis::use_package()</code>) but in exchange I can see them listed all in one file, rather than being a bunch of <code>library</code> calls scattered throughout multiple files. <a href="https://rstudio.github.io/renv/index.html">This is also one of the ways that <code>renv</code> can pick up on dependencies</a>, to make reproducibility easier.</li>
+<li><a href="https://roxygen2.r-lib.org/">Powerful function documentation through <code>Roxygen2</code></a>. By putting some special comments above my functions, I can generate proper R documentation. It’s satisfying to type <code>?my_custom_function</code> and see help material. Even if I’m the only one who will use this code, that documentation make my life easier. Hint: use RStudio to generate Roxygen skeletons!</li>
+<li>A convenient testing framework through <code>testthat</code>. Unit tests save time, and this is the hill I will die on. There’s a bit of set-up involved, but it’s all taken care of the first time a test is created with <code>usethis::use_test()</code>.</li>
+<li>An all-in-one package check. <code>rcmdcheck::rcmdcheck()</code> (also available as a button in RStudio) not only runs my unit tests, but also looks for issues with portability, missing dependency declarations, misplaced characters, and much more. I often run this when I’m developing my functions, and I also set it up to <a href="/post/mlops-with-github-actions-and-r/">run automatically every time I push code to GitHub</a>. This is a big deal — if I break a unit test or do something else wrong, I want to know about it!</li>
+</ul>
+</div>
+<div id="package-development-shortcuts" class="section level3">
+<h3>Package development shortcuts</h3>
+<p>I took note of every function and shortcut I use when following a package workflow. Every function below links to its documentation:</p>
+<table>
+<colgroup>
+<col width="39%" />
+<col width="35%" />
+<col width="25%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Operation</th>
+<th>Function</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Create a new package</td>
+<td><a href="https://usethis.r-lib.org/reference/create_package.html"><code>usethis::create_package</code></a></td>
+<td>Also creates an RStudio project if you’re using RStudio</td>
+</tr>
+<tr class="even">
+<td>Create a new function</td>
+<td><a href="https://usethis.r-lib.org/reference/use_r.html"><code>usethis::use_r</code></a></td>
+<td>If the file exists, will open it</td>
+</tr>
+<tr class="odd">
+<td>Create a new test file</td>
+<td><a href="https://usethis.r-lib.org/reference/use_r.html"><code>usethis::use_test</code></a></td>
+<td>File names are prefixed with “test-”. Will also set up test infrastructure if it doesn’t already exist.</td>
+</tr>
+<tr class="even">
+<td>Declare a dependency</td>
+<td><a href="https://usethis.r-lib.org/reference/use_package.html"><code>usethis::use_package</code></a></td>
+<td>Use the <code>type = "Suggests"</code> argument for suggested packages</td>
+</tr>
+<tr class="odd">
+<td>Source all functions</td>
+<td><a href="https://devtools.r-lib.org/reference/load_all.html"><code>devtools::load_all</code></a></td>
+<td>RStudio default keyboard shortcut: Ctrl/⌘ + Shift + L</td>
+</tr>
+<tr class="even">
+<td>Build documentation</td>
+<td><a href="https://devtools.r-lib.org/reference/document.html"><code>devtools::document</code></a></td>
+<td>RStudio default keyboard shortcut: Ctrl/⌘ + Shift + D</td>
+</tr>
+<tr class="odd">
+<td>Set up environment to pin package dependencies</td>
+<td><a href="https://rstudio.github.io/renv/reference/init.html"><code>renv::init</code></a></td>
+<td><a href="https://rstudio.github.io/renv/articles/renv.html">renv</a> is extremely important for any piece of work that needs to be reproducible</td>
+</tr>
+<tr class="even">
+<td>Capture or update package dependencies</td>
+<td><a href="https://rstudio.github.io/renv/reference/snapshot.html"><code>renv::snapshot</code></a></td>
+<td>This is in addition to the dependencies in the <code>DESCRIPTION</code> file, since it captures <em>all</em> required packages along with their installed versions</td>
+</tr>
+<tr class="odd">
+<td>Run tests</td>
+<td><a href="https://devtools.r-lib.org/reference/test.html"><code>devtools::test</code></a></td>
+<td>UI option: In RStudio, look for the “Test package” option below the “More” button in the “Build” tab. RStudio default keyboard shortcut: Ctrl/⌘ + Shift + T</td>
+</tr>
+<tr class="even">
+<td>Run tests in a specific file</td>
+<td><a href="https://devtools.r-lib.org/reference/test.html"><code>devtools::test_file</code></a></td>
+<td>By default, will test the active file, or a file path can be provided. UI option: he test file in RStudio and look for the “Run Tests” button above the editor.</td>
+</tr>
+<tr class="odd">
+<td>Run a full package check, including tests</td>
+<td><a href="https://rdrr.io/cran/rcmdcheck/man/rcmdcheck.html"><code>rcmdcheck::rcmdcheck</code></a></td>
+<td>UI option: In Rstudio, look for the “Check” button in the “Build” tab</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div id="package-workflows-and-apis" class="section level3">
+<h3>Package workflows and APIs</h3>
+<p>R code can be served as an API with <a href="https://www.rplumber.io/">the <code>plumber</code> package</a>, and this is compatible with a package workflow. James Blair gave <a href="https://rstudio.com/resources/rstudioconf-2020/practical-plumber-patterns/">a great talk on <em>Practical Plumber Patterns</em> at rstudio::conf 2020</a> where he presented an R package combined with <code>plumber</code>. One of the functions in the package actually starts the API. <a href="https://github.com/blairj09-talks/ppp/">The source code is available on GitHub</a></p>
+</div>
+</div>
+<div id="the-other-language" class="section level1">
+<h1>The other language</h1>
+<p>I use Python almost every day, but I hadn’t given a lot of thought on how to structure a Python project. I reached out to Twitter to see if there was a standard.</p>
+<div class="figure">
+<img src="figs/tweet-1.png" alt="" />
+<p class="caption">Tweet by mdneuzerling: (Python) How do you structure your projects when you know it’s going to be a complicated piece of work? Do you just start making notebooks, or do you carefully set up a module structure first? Do python projects have a “refactor notebooks to scripts” phase?</p>
+</div>
+<p><a href="https://twitter.com/mdneuzerling/status/1281737241610473472">Thank you to everyone who responded to this!</a> I learnt a lot.</p>
+<p>The responses are worth reading. There’s a range of answers, but the general theme is about “promoting” code from an informal notebook to a formal module. Some people start with a module structure, which they install into their system, and then use notebooks for exploration. Some people start with notebooks, and eventually transition their work into something with more structure.</p>
+<div id="handy-python-workflow-tools" class="section level3">
+<h3>Handy Python workflow tools</h3>
+<p>There are tools in Python that make projects a bit easier:</p>
+<ul>
+<li><a href="https://cookiecutter.readthedocs.io">Cookiecutter</a> is a tool for creating projects in Python from templates. The package includes a few official templates (including a package template) but there are over 4000 templates supplied by members of the Python community.</li>
+<li><a href="https://python-poetry.org">Poetry</a> is a build tool for Python packages with a heavy emphasis on dependency management.</li>
+<li><code>pip install -e</code> install an “editable” version of a local module. This means that changes to the local code are <em>immediately</em> reflected.</li>
+<li><a href="https://github.com/fastai/nbdev">nbdev</a> makes it easier to develop in notebooks, by allowing easy promotion of code to a module with tags.</li>
+</ul>
+<p>I’m particularly keen to check out Cookiecutter. It seems like it fills a purpose in Python similar to that of the <code>usethis</code> package in R.</p>
+</div>
+<div id="i-struggle-with-notebooks" class="section level3">
+<h3>I struggle with notebooks</h3>
+<p>Personally, though, I still can’t quite grok notebooks. I remember using them way back in the day when I was using <a href="https://www.sagemath.org/">SageMath</a>, but now they just don’t click with me. The idea that I have to switch a cell to markdown still throws me off, and I find myself reaching for a repl that doesn’t exist. Mentally I tell myself, “I’ll create a cell which I’ll use just for quick calculations”, and my experience is that this is a recipe for a notebook filled with junk code.</p>
+<p>I still use notebooks when I’m working in Python — Python users tend to be wedded to them, and I don’t want to be the one going against the grain instead of collaborating. In the past I’ve used Spyder or VSCode for Python development. Lately I’ve even be experimenting with RStudio as a Python IDE, and it does pretty well.</p>
+<hr />
+<pre class="r"><code>devtools::session_info()</code></pre>
+<pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
+##  setting  value                       
+##  version  R version 4.1.0 (2021-05-18)
+##  os       macOS Big Sur 11.3          
+##  system   aarch64, darwin20           
+##  ui       X11                         
+##  language (EN)                        
+##  collate  en_AU.UTF-8                 
+##  ctype    en_AU.UTF-8                 
+##  tz       Australia/Melbourne         
+##  date     2021-05-30                  
+## 
+## ─ Packages ───────────────────────────────────────────────────────────────────
+##  package     * version date       lib source        
+##  blogdown      1.3     2021-04-14 [1] CRAN (R 4.1.0)
+##  bookdown      0.22    2021-04-22 [1] CRAN (R 4.1.0)
+##  bslib         0.2.5.1 2021-05-18 [1] CRAN (R 4.1.0)
+##  cachem        1.0.4   2021-02-13 [1] CRAN (R 4.1.0)
+##  callr         3.7.0   2021-04-20 [1] CRAN (R 4.1.0)
+##  cli           2.5.0   2021-04-26 [1] CRAN (R 4.1.0)
+##  crayon        1.4.1   2021-02-08 [1] CRAN (R 4.1.0)
+##  desc          1.3.0   2021-03-05 [1] CRAN (R 4.1.0)
+##  devtools      2.4.0   2021-04-07 [1] CRAN (R 4.1.0)
+##  digest        0.6.27  2020-10-24 [1] CRAN (R 4.1.0)
+##  ellipsis      0.3.2   2021-04-29 [1] CRAN (R 4.1.0)
+##  evaluate      0.14    2019-05-28 [1] CRAN (R 4.1.0)
+##  fastmap       1.1.0   2021-01-25 [1] CRAN (R 4.1.0)
+##  fs            1.5.0   2020-07-31 [1] CRAN (R 4.1.0)
+##  glue          1.4.2   2020-08-27 [1] CRAN (R 4.1.0)
+##  htmltools     0.5.1.1 2021-01-22 [1] CRAN (R 4.1.0)
+##  jquerylib     0.1.4   2021-04-26 [1] CRAN (R 4.1.0)
+##  jsonlite      1.7.2   2020-12-09 [1] CRAN (R 4.1.0)
+##  knitr         1.33    2021-04-24 [1] CRAN (R 4.1.0)
+##  lifecycle     1.0.0   2021-02-15 [1] CRAN (R 4.1.0)
+##  magrittr      2.0.1   2020-11-17 [1] CRAN (R 4.1.0)
+##  memoise       2.0.0   2021-01-26 [1] CRAN (R 4.1.0)
+##  pkgbuild      1.2.0   2020-12-15 [1] CRAN (R 4.1.0)
+##  pkgload       1.2.1   2021-04-06 [1] CRAN (R 4.1.0)
+##  prettyunits   1.1.1   2020-01-24 [1] CRAN (R 4.1.0)
+##  processx      3.5.2   2021-04-30 [1] CRAN (R 4.1.0)
+##  ps            1.6.0   2021-02-28 [1] CRAN (R 4.1.0)
+##  purrr         0.3.4   2020-04-17 [1] CRAN (R 4.1.0)
+##  R6            2.5.0   2020-10-28 [1] CRAN (R 4.1.0)
+##  remotes       2.3.0   2021-04-01 [1] CRAN (R 4.1.0)
+##  rlang         0.4.11  2021-04-30 [1] CRAN (R 4.1.0)
+##  rmarkdown     2.8     2021-05-07 [1] CRAN (R 4.1.0)
+##  rprojroot     2.0.2   2020-11-15 [1] CRAN (R 4.1.0)
+##  sass          0.4.0   2021-05-12 [1] CRAN (R 4.1.0)
+##  sessioninfo   1.1.1   2018-11-05 [1] CRAN (R 4.1.0)
+##  stringi       1.6.1   2021-05-10 [1] CRAN (R 4.1.0)
+##  stringr       1.4.0   2019-02-10 [1] CRAN (R 4.1.0)
+##  testthat      3.0.2   2021-02-14 [1] CRAN (R 4.1.0)
+##  usethis       2.0.1   2021-02-10 [1] CRAN (R 4.1.0)
+##  withr         2.4.2   2021-04-18 [1] CRAN (R 4.1.0)
+##  xfun          0.22    2021-03-11 [1] CRAN (R 4.1.0)
+##  yaml          2.2.1   2020-02-01 [1] CRAN (R 4.1.0)
+## 
+## [1] /Library/Frameworks/R.framework/Versions/4.1-arm64/Resources/library</code></pre>
+<p><a href="https://www.pexels.com/photo/silver-metal-round-gears-connected-to-each-other-149387/">The image at the top of this page is in the public domain</a>.</p>
+</div>
+</div>
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn1"><p>For closed-source packages, create a file that says “Proprietary. Property of <X>.” Then put “License: file LICENSE” in the package <code>DESCRIPTION</code>.<a href="#fnref1" class="footnote-back">↩︎</a></p></li>
+</ol>
+</div>

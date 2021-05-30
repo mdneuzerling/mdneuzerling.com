@@ -6,7 +6,7 @@ slug: sourcing-data-from-s3-with-drake
 tags:
     - R
 images: ["/img/drake-etag.png"]
-output: hugodown::md_document
+
 ---
 
 ```{r setup, include=FALSE}

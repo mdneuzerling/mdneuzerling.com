@@ -1,0 +1,348 @@
+---
+title: Tracking Tidymodels with MLflow
+author: ~
+date: '2020-08-16'
+slug: tracking-tidymodels-with-mlflow
+tags:
+    - R
+images: ["/img/mlflow-tracking.png"]
+
+---
+
+<script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
+
+
+<p>After I posted <a href="/post/deploying-r-models-with-mlflow-and-docker/">my efforts to use MLflow to serve a model with R</a>, I was worried that people may think I don’t <em>like</em> MLflow. I want to declare this: MLflow is awesome. I’ll showcase its model tracking features, and how to integrate them into a <code>tidymodels</code> model.</p>
+<p>The Tracking component of MLflow can be used to record parameters, metrics and artifacts every time a model is trained. All of this information is presented in a very nice user interface. I’ll also finish off here by demonstrating how to serve a model created with Tidymodels, which I find much easier than serving a model created with arbitrary code.</p>
+<p><strong>Update 2021-05-40:</strong> Due to Python packaging issues, I’m no longer able to recreate the content of this blog post. I’ve hardcoded the results instead. If you’re trying to run the code in this blog post, be aware that it may no longer work.</p>
+<div id="prepare-a-model" class="section level2">
+<h2>Prepare a model</h2>
+<p>I’ll prepare a model using the recent TidyTuesday coffee data. This is the same process I followed in <a href="/post/machine-learning-pipelines-with-tidymodels-and-targets/">my last post</a>, except I’ll stop short of fitting and evaluating the model so I can track those steps with MLflow.</p>
+<pre class="r"><code>coffee &lt;- invisible(tidytuesdayR::tt_load(2020, week = 28)$coffee)</code></pre>
+<pre><code>## 
+##  Downloading file 1 of 1: `coffee_ratings.csv`</code></pre>
+<pre class="r"><code>coffee_split &lt;- initial_split(coffee, prop = 0.8)
+coffee_train &lt;- training(coffee_split)
+coffee_test &lt;- testing(coffee_split)
+coffee_recipe &lt;- recipe(coffee_train) %&gt;%
+  update_role(everything(), new_role = &quot;support&quot;) %&gt;% 
+  update_role(cupper_points, new_role = &quot;outcome&quot;) %&gt;%
+  update_role(
+    variety, processing_method, country_of_origin,
+    aroma, flavor, aftertaste, acidity, sweetness, altitude_mean_meters,
+    new_role = &quot;predictor&quot;
+  ) %&gt;%
+  step_string2factor(all_nominal(), -all_outcomes()) %&gt;%
+  step_knnimpute(country_of_origin,
+                 impute_with = imp_vars(
+                   in_country_partner, company, region, farm_name, certification_body
+                 )
+  ) %&gt;%
+  step_knnimpute(altitude_mean_meters,
+                 impute_with = imp_vars(
+                   in_country_partner, company, region, farm_name, certification_body,
+                   country_of_origin
+                 )
+  ) %&gt;%
+  step_unknown(variety, processing_method, new_level = &quot;Unknown&quot;) %&gt;%
+  step_other(country_of_origin, threshold = 0.01) %&gt;%
+  step_other(processing_method, threshold = 0.10) %&gt;%
+  step_other(variety, threshold = 0.10) %&gt;% 
+  step_normalize(all_numeric(), -all_outcomes())
+coffee_model &lt;- rand_forest(trees = tune(), mtry = tune()) %&gt;%
+  set_engine(&quot;ranger&quot;) %&gt;%
+  set_mode(&quot;regression&quot;)
+coffee_workflow &lt;- workflows::workflow() %&gt;%
+  add_recipe(coffee_recipe) %&gt;%
+  add_model(coffee_model)
+coffee_grid &lt;- expand_grid(mtry = 3:5, trees = seq(500, 1500, by = 200))
+coffee_grid_results &lt;- coffee_workflow %&gt;%
+  tune_grid(resamples &lt;- vfold_cv(coffee_train, v = 5), grid = coffee_grid)
+hyperparameters &lt;- coffee_grid_results %&gt;% 
+  select_by_pct_loss(metric = &quot;rmse&quot;, limit = 5, trees)</code></pre>
+<pre class="r"><code>coffee_workflow</code></pre>
+<pre><code>## ══ Workflow ════════════════════════════════════════════════════════════════════
+## Preprocessor: Recipe
+## Model: rand_forest()
+## 
+## ── Preprocessor ────────────────────────────────────────────────────────────────
+## 8 Recipe Steps
+## 
+## • step_string2factor()
+## • step_impute_knn()
+## • step_impute_knn()
+## • step_unknown()
+## • step_other()
+## • step_other()
+## • step_other()
+## • step_normalize()
+## 
+## ── Model ───────────────────────────────────────────────────────────────────────
+## Random Forest Model Specification (regression)
+## 
+## Main Arguments:
+##   mtry = tune()
+##   trees = tune()
+## 
+## Computational engine: ranger</code></pre>
+</div>
+<div id="automatic-tracking-with-workflows" class="section level1">
+<h1>Automatic tracking with workflows</h1>
+<p>MLflow tracking is organised around <em>experiments</em> and <em>runs</em>. Broadly speaking, an experiment is a <em>project</em>, whereas a run is a process in which a model is trained and evaluated. But these categories could be repurposed for anything<a href="#fn1" class="footnote-ref" id="fnref1"><sup>1</sup></a>.</p>
+<p>In each run the user can record <em>parameters</em> and <em>metrics</em>. Parameters and metrics are both arbitrary key-value pairs that could be used for anything. In my coffee example, I might have parameters <code>trees: 500</code> and <code>mtry: 3</code>. My metric might be <code>mae: 0.2</code>. I would log this information with <code>mlflow_log_param("trees", 500)</code> or <code>mlflow_log_metric("mae", 0.2)</code>. That’s all I need to do, and MLflow takes care of the rest.</p>
+<p>I’ll be storing all of this information locally, with MLflow recording information in the <code>mlruns</code> directory in my working directory. Alternatively, <a href="https://www.mlflow.org/docs/latest/tracking.html#where-runs-are-recorded">I could host my tracking information remotely, for example in a database</a>.</p>
+<p>Certain kinds of Python model <em>flavours</em>, such as Tensorflow, have <em>autotracking</em> in which parameters and metrics are automatically recorded. I’ll try and implement a rough version of this for a Tidymodels <code>workflow</code>. I’m aiming for functions here that let me record parameters and metrics for any type of model implemented through as a Tidymodels <code>workflow</code>, so that I can change from a random forest to a linear model without adjusting my MLflow code.</p>
+<p>I’ll start with a function for logging model hyperparameters as MLflow parameters. This function will only log hyperparameters set by the user, since the default values have a <code>NULL</code> expression, but I think that this approach makes sense. It also passes on the input workflow unmodified, so it’s pipe-friendly:</p>
+<pre class="r"><code>log_workflow_parameters &lt;- function(workflow) {
+  # Would help to have a check here: has this workflow been finalised?
+  # It may be sufficient to check that the arg quosures carry no environments.
+  spec &lt;- workflows::pull_workflow_spec(workflow)
+  parameter_names &lt;- names(spec$args)
+  parameter_values &lt;- lapply(spec$args, rlang::get_expr)
+  for (i in seq_along(spec$args)) {
+    parameter_name &lt;- parameter_names[[i]]
+    parameter_value &lt;- parameter_values[[i]]
+    if (!is.null(parameter_value)) {
+      mlflow_log_param(parameter_name, parameter_value)
+    }
+  }
+  workflow
+}</code></pre>
+<p>Now I’ll do the same for metrics. The input to this function will be a metrics tibble produced by the <code>yardstick</code> package, which is a component of <code>tidymodels</code>:</p>
+<pre class="r"><code>log_metrics &lt;- function(metrics, estimator = &quot;standard&quot;) {
+  metrics %&gt;% filter(.estimator == estimator) %&gt;% pmap(
+    function(.metric, .estimator, .estimate) {
+      mlflow_log_metric(.metric, .estimate)  
+    }
+  )
+  metrics
+}</code></pre>
+<div id="packaging-workflows-is-pretty-easy" class="section level2">
+<h2>Packaging workflows is pretty easy</h2>
+<p>There’s one last component I need to make this work. Apart from parameters and metrics, I can also store <em>artifacts</em> with each run. These are usually models, but could be anything. MLflow supports exporting models with the <code>carrier::crate</code> function. <a href="/post/deploying-r-models-with-mlflow-and-docker/">This is a tricky function to use</a>, since the user must comprehensively list their dependencies. For a <code>workflow</code> with a <code>recipe</code>, it’s a lot easier. All of the preprocessing is contained within the recipe, and the fitted workflow object contains this.</p>
+<pre class="r"><code># I haven&#39;t yet defined fitted_coffee_model, so I won&#39;t run this
+crated_model &lt;- carrier::crate(
+  function(x) workflows:::predict.workflow(fitted_coffee_model, x),
+  fitted_coffee_model = fitted_coffee_model
+)</code></pre>
+<p>MLflow tracks <em>artifacts</em> along with parameters and metrics. These are any files associated with the run, including models. I think the <code>mlflow_log_model</code> function should be used here, but it doesn’t work for me. Instead I save the crated model with <code>mlflow_save_model</code> and log it with <code>mlflow_log_artifact</code>.</p>
+</div>
+<div id="tracking-a-model-training-run-with-mlflow" class="section level2">
+<h2>Tracking a model training run with MLflow</h2>
+<p>I’ll set my experiment as <code>coffee</code>. I only need to do this once per session:</p>
+<pre class="r"><code>mlflow_set_experiment(experiment_name = &quot;coffee&quot;)</code></pre>
+<p>To actually <em>do</em> an MLflow run, I wrap my model training and evaluation code in a <code>with(mlflow_start_run(), ...)</code> block. I insert my logging functions into my training code:</p>
+<pre class="r"><code>with(mlflow_start_run(), {
+  fitted_coffee_model &lt;- coffee_workflow %&gt;%
+    finalize_workflow(hyperparameters) %&gt;%
+    log_workflow_parameters() %&gt;%  
+    fit(coffee_train)
+  metrics &lt;- fitted_coffee_model %&gt;%
+    predict(coffee_test) %&gt;%
+    metric_set(rmse, mae, rsq)(coffee_test$cupper_points, .pred) %&gt;% 
+    log_metrics()
+  crated_model &lt;- carrier::crate(
+    function(x) workflows:::predict.workflow(fitted_coffee_model, x),
+    fitted_coffee_model = fitted_coffee_model
+  )
+  mlflow_save_model(crated_model, here::here(&quot;models&quot;))
+  mlflow_log_artifact(here::here(&quot;models&quot;, &quot;crate.bin&quot;))
+})
+#&gt; 2020/08/17 09:09:28 INFO mlflow.store.artifact.cli: Logged artifact from local file /home/mdneuzerling/mdneuzerling.com/models/crate.bin to artifact_path=None
+#&gt; 
+#&gt; Root URI: /home/mdneuzerling/Documents/coffee/mlruns/1/d2bdcbdf3e9849598b393951fa69214c/artifacts</code></pre>
+<p>I can see all the run information, stored as plain text, appearing in my <code>mlruns</code> directory now:</p>
+<pre class="r"><code>fs::dir_tree(&quot;mlruns/1/f26b040f80244b00882d2925ebdc8396/&quot;)
+#&gt; mlruns/1/f26b040f80244b00882d2925ebdc8396/
+#&gt; ├── artifacts
+#&gt; │   └── crate.bin
+#&gt; ├── meta.yaml
+#&gt; ├── metrics
+#&gt; │   ├── mae
+#&gt; │   ├── rmse
+#&gt; │   └── rsq
+#&gt; ├── params
+#&gt; │   ├── mtry
+#&gt; │   └── trees
+#&gt; └── tags
+#&gt;     ├── mlflow.source.name
+#&gt;     ├── mlflow.source.type
+#&gt;     └── mlflow.user</code></pre>
+<p>I have a quibble here: I create an experiment with a name, but MLflow identifies experiments with an integer ID. It would be great if I could write <code>with(mlflow_start_run(experiment_name = "coffee"), ...)</code>, but only the <code>experiment_id</code> is supported. It’s a minor point, but I’m not a fan of having that separate <code>mlflow_set_experiment</code> function there because it’s a state that I have to manage in a functional language. The other issue here is that while my collaborators and I might all be using the same <code>experiment_name</code>, we don’t know that we’ll be on the same <code>experiment_id</code>.</p>
+</div>
+<div id="viewing-runs-with-the-mlflow-ui" class="section level2">
+<h2>Viewing runs with the MLflow UI</h2>
+<p>MLflow comes with a gorgeous user interface for exploring previous model runs. I can run it with <code>mlflow_ui</code> and view it in my browser:</p>
+<p><img src="mlflow-ui.png" /></p>
+<p>A word of warning: the model hyperparameters in this UI are placed directly next to the model metrics. The dashboard makes it look like I should be selecting the hyperparameters which reduce my error metrics. I can’t use the same test data to select my hyperparameters <em>and</em> evaluate my model, because this leaks information from the test set to the model. But the UI places the hyperparameters next to the metrics, making it look as though I should be selecting the hyperparameters with the best metrics.</p>
+<p>This isn’t a flaw of MLflow, though. One thing I could do here to make the data leakage trap easier to avoid is to log the “cross-validation RMSE” that was used to select the hyperparameters. If I include this is a column before the other metrics, it makes it clear what I used to select those <code>trees</code> and <code>mtry</code> values.</p>
+<p>What I really like about this use of MLflow is that if there’s an error in my model training run, MLflow will pick that up and record what it can, and label the run as an error in the UI:</p>
+<p><img src="mlflow-ui-with-errors.png" /></p>
+</div>
+<div id="serving-coffee" class="section level2">
+<h2>Serving coffee</h2>
+<p>MLflow Models is the MLflow component used for serving exported models as APIs. I can serve my coffee model that I exported earlier with <code>mlflow_rfunc_serve("models")</code>. Since I’m overwriting this directory with each run (before I log the artifact with the run), this will be the last model to have been exported. This command will open up a Swagger UI, so I don’t have to mess around with piecing together a HTTP request.</p>
+<p>To test this, I can try to predict the results of a random data point in the test set. Note the <code>na = "string"</code> argument here, since missing values will be incorrectly represented without it:</p>
+<pre class="r"><code>coffee_test %&gt;% select(-cupper_points) %&gt;% sample_n(1) %&gt;% jsonlite::toJSON(na = &quot;string&quot;)`</code></pre>
+<p><img src="mlflow-prediction.png" /></p>
+<p>It seems as though this method only serves one prediction at a time, even if multiple rows are provided.</p>
+<p>I could also have served this model through the command line with <code>mlflow models serve -m models/</code>.</p>
+</div>
+<div id="tidymodels-works-really-well-with-mlflow" class="section level2">
+<h2><code>tidymodels</code> works really well with MLflow</h2>
+<p><code>tidymodels</code> presents an excellent opportunity to make life a bit easier for R users who want to take advantage of MLflow.</p>
+<p>MLflow exports models through patterns known as <em>flavours</em>. <a href="https://www.mlflow.org/docs/latest/models.html#built-in-model-flavors">There are many flavour available for Python</a>, but only <code>crate</code> and <code>keras</code> for R. <code>crate</code> does have the advantage of supporting arbitrary R code, however.</p>
+<p>A <code>tidymodels</code> flavour for workflows/parsnip models could be implemented through the <code>crate</code> flavour, as I’ve done above, or separately. This isn’t as tricky as exporting arbitrary R code, since all of the preprocessing is done through the <code>recipes</code> package.</p>
+<p>The <code>tidymodels</code> framework also opens up the possibility of autologging. I’ve implemented some functions above that accomplish this, but they’re a little rough. With a bit of polish, users could take advantage of MLflow with very little effort.</p>
+<hr />
+<pre class="r"><code>devtools::session_info()</code></pre>
+<pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
+##  setting  value                       
+##  version  R version 4.1.0 (2021-05-18)
+##  os       macOS Big Sur 11.3          
+##  system   aarch64, darwin20           
+##  ui       X11                         
+##  language (EN)                        
+##  collate  en_AU.UTF-8                 
+##  ctype    en_AU.UTF-8                 
+##  tz       Australia/Melbourne         
+##  date     2021-05-30                  
+## 
+## ─ Packages ───────────────────────────────────────────────────────────────────
+##  package      * version    date       lib source        
+##  askpass        1.1        2019-01-13 [1] CRAN (R 4.1.0)
+##  assertthat     0.2.1      2019-03-21 [1] CRAN (R 4.1.0)
+##  backports      1.2.1      2020-12-09 [1] CRAN (R 4.1.0)
+##  base64enc      0.1-3      2015-07-28 [1] CRAN (R 4.1.0)
+##  blogdown       1.3        2021-04-14 [1] CRAN (R 4.1.0)
+##  bookdown       0.22       2021-04-22 [1] CRAN (R 4.1.0)
+##  broom        * 0.7.6      2021-04-05 [1] CRAN (R 4.1.0)
+##  bslib          0.2.5.1    2021-05-18 [1] CRAN (R 4.1.0)
+##  cachem         1.0.4      2021-02-13 [1] CRAN (R 4.1.0)
+##  callr          3.7.0      2021-04-20 [1] CRAN (R 4.1.0)
+##  cellranger     1.1.0      2016-07-27 [1] CRAN (R 4.1.0)
+##  class          7.3-19     2021-05-03 [1] CRAN (R 4.1.0)
+##  cli            2.5.0      2021-04-26 [1] CRAN (R 4.1.0)
+##  codetools      0.2-18     2020-11-04 [1] CRAN (R 4.1.0)
+##  colorspace     2.0-1      2021-05-04 [1] CRAN (R 4.1.0)
+##  crayon         1.4.1      2021-02-08 [1] CRAN (R 4.1.0)
+##  DBI            1.1.1      2021-01-15 [1] CRAN (R 4.1.0)
+##  dbplyr         2.1.1      2021-04-06 [1] CRAN (R 4.1.0)
+##  desc           1.3.0      2021-03-05 [1] CRAN (R 4.1.0)
+##  devtools       2.4.0      2021-04-07 [1] CRAN (R 4.1.0)
+##  dials        * 0.0.9      2020-09-16 [1] CRAN (R 4.1.0)
+##  DiceDesign     1.9        2021-02-13 [1] CRAN (R 4.1.0)
+##  digest         0.6.27     2020-10-24 [1] CRAN (R 4.1.0)
+##  dplyr        * 1.0.5      2021-03-05 [1] CRAN (R 4.1.0)
+##  ellipsis       0.3.2      2021-04-29 [1] CRAN (R 4.1.0)
+##  evaluate       0.14       2019-05-28 [1] CRAN (R 4.1.0)
+##  fansi          0.4.2      2021-01-15 [1] CRAN (R 4.1.0)
+##  fastmap        1.1.0      2021-01-25 [1] CRAN (R 4.1.0)
+##  forcats      * 0.5.1      2021-01-27 [1] CRAN (R 4.1.0)
+##  foreach        1.5.1      2020-10-15 [1] CRAN (R 4.1.0)
+##  forge          0.2.0      2019-02-26 [1] CRAN (R 4.1.0)
+##  fs             1.5.0      2020-07-31 [1] CRAN (R 4.1.0)
+##  furrr          0.2.2      2021-01-29 [1] CRAN (R 4.1.0)
+##  future         1.21.0     2020-12-10 [1] CRAN (R 4.1.0)
+##  generics       0.1.0      2020-10-31 [1] CRAN (R 4.1.0)
+##  ggplot2      * 3.3.3      2020-12-30 [1] CRAN (R 4.1.0)
+##  globals        0.14.0     2020-11-22 [1] CRAN (R 4.1.0)
+##  glue           1.4.2      2020-08-27 [1] CRAN (R 4.1.0)
+##  gower          0.2.2      2020-06-23 [1] CRAN (R 4.1.0)
+##  GPfit          1.0-8      2019-02-08 [1] CRAN (R 4.1.0)
+##  gtable         0.3.0      2019-03-25 [1] CRAN (R 4.1.0)
+##  haven          2.4.1      2021-04-23 [1] CRAN (R 4.1.0)
+##  hms            1.0.0      2021-01-13 [1] CRAN (R 4.1.0)
+##  htmltools      0.5.1.1    2021-01-22 [1] CRAN (R 4.1.0)
+##  httpuv         1.6.1      2021-05-07 [1] CRAN (R 4.1.0)
+##  httr           1.4.2      2020-07-20 [1] CRAN (R 4.1.0)
+##  infer        * 0.5.4      2021-01-13 [1] CRAN (R 4.1.0)
+##  ini            0.3.1      2018-05-20 [1] CRAN (R 4.1.0)
+##  ipred          0.9-11     2021-03-12 [1] CRAN (R 4.1.0)
+##  iterators      1.0.13     2020-10-15 [1] CRAN (R 4.1.0)
+##  jquerylib      0.1.4      2021-04-26 [1] CRAN (R 4.1.0)
+##  jsonlite       1.7.2      2020-12-09 [1] CRAN (R 4.1.0)
+##  knitr          1.33       2021-04-24 [1] CRAN (R 4.1.0)
+##  later          1.2.0      2021-04-23 [1] CRAN (R 4.1.0)
+##  lattice        0.20-44    2021-05-02 [1] CRAN (R 4.1.0)
+##  lava           1.6.9      2021-03-11 [1] CRAN (R 4.1.0)
+##  lhs            1.1.1      2020-10-05 [1] CRAN (R 4.1.0)
+##  lifecycle      1.0.0      2021-02-15 [1] CRAN (R 4.1.0)
+##  listenv        0.8.0      2019-12-05 [1] CRAN (R 4.1.0)
+##  lubridate      1.7.10     2021-02-26 [1] CRAN (R 4.1.0)
+##  magrittr       2.0.1      2020-11-17 [1] CRAN (R 4.1.0)
+##  MASS           7.3-54     2021-05-03 [1] CRAN (R 4.1.0)
+##  Matrix         1.3-3      2021-05-04 [1] CRAN (R 4.1.0)
+##  memoise        2.0.0      2021-01-26 [1] CRAN (R 4.1.0)
+##  mlflow       * 1.17.0     2021-05-08 [1] CRAN (R 4.1.0)
+##  modeldata    * 0.1.0      2020-10-22 [1] CRAN (R 4.1.0)
+##  modelr         0.1.8      2020-05-19 [1] CRAN (R 4.1.0)
+##  munsell        0.5.0      2018-06-12 [1] CRAN (R 4.1.0)
+##  nnet           7.3-16     2021-05-03 [1] CRAN (R 4.1.0)
+##  openssl        1.4.4      2021-04-30 [1] CRAN (R 4.1.0)
+##  parallelly     1.25.0     2021-04-30 [1] CRAN (R 4.1.0)
+##  parsnip      * 0.1.6      2021-05-27 [1] CRAN (R 4.1.0)
+##  pillar         1.6.1      2021-05-16 [1] CRAN (R 4.1.0)
+##  pkgbuild       1.2.0      2020-12-15 [1] CRAN (R 4.1.0)
+##  pkgconfig      2.0.3      2019-09-22 [1] CRAN (R 4.1.0)
+##  pkgload        1.2.1      2021-04-06 [1] CRAN (R 4.1.0)
+##  plyr           1.8.6      2020-03-03 [1] CRAN (R 4.1.0)
+##  png            0.1-7      2013-12-03 [1] CRAN (R 4.1.0)
+##  prettyunits    1.1.1      2020-01-24 [1] CRAN (R 4.1.0)
+##  pROC           1.17.0.1   2021-01-13 [1] CRAN (R 4.1.0)
+##  processx       3.5.2      2021-04-30 [1] CRAN (R 4.1.0)
+##  prodlim        2019.11.13 2019-11-17 [1] CRAN (R 4.1.0)
+##  promises       1.2.0.1    2021-02-11 [1] CRAN (R 4.1.0)
+##  ps             1.6.0      2021-02-28 [1] CRAN (R 4.1.0)
+##  purrr        * 0.3.4      2020-04-17 [1] CRAN (R 4.1.0)
+##  R6             2.5.0      2020-10-28 [1] CRAN (R 4.1.0)
+##  Rcpp           1.0.6      2021-01-15 [1] CRAN (R 4.1.0)
+##  readr        * 1.4.0      2020-10-05 [1] CRAN (R 4.1.0)
+##  readxl         1.3.1      2019-03-13 [1] CRAN (R 4.1.0)
+##  recipes      * 0.1.16     2021-04-16 [1] CRAN (R 4.1.0)
+##  remotes        2.3.0      2021-04-01 [1] CRAN (R 4.1.0)
+##  reprex         2.0.0      2021-04-02 [1] CRAN (R 4.1.0)
+##  reticulate     1.20       2021-05-03 [1] CRAN (R 4.1.0)
+##  rlang          0.4.11     2021-04-30 [1] CRAN (R 4.1.0)
+##  rmarkdown      2.8        2021-05-07 [1] CRAN (R 4.1.0)
+##  rpart          4.1-15     2019-04-12 [1] CRAN (R 4.1.0)
+##  rprojroot      2.0.2      2020-11-15 [1] CRAN (R 4.1.0)
+##  rsample      * 0.1.0      2021-05-08 [1] CRAN (R 4.1.0)
+##  rstudioapi     0.13       2020-11-12 [1] CRAN (R 4.1.0)
+##  rvest          1.0.0      2021-03-09 [1] CRAN (R 4.1.0)
+##  sass           0.4.0      2021-05-12 [1] CRAN (R 4.1.0)
+##  scales       * 1.1.1      2020-05-11 [1] CRAN (R 4.1.0)
+##  sessioninfo    1.1.1      2018-11-05 [1] CRAN (R 4.1.0)
+##  stringi        1.6.1      2021-05-10 [1] CRAN (R 4.1.0)
+##  stringr      * 1.4.0      2019-02-10 [1] CRAN (R 4.1.0)
+##  survival       3.2-11     2021-04-26 [1] CRAN (R 4.1.0)
+##  swagger        3.33.1     2020-10-02 [1] CRAN (R 4.1.0)
+##  testthat       3.0.2      2021-02-14 [1] CRAN (R 4.1.0)
+##  tibble       * 3.1.2      2021-05-16 [1] CRAN (R 4.1.0)
+##  tidymodels   * 0.1.3      2021-04-19 [1] CRAN (R 4.1.0)
+##  tidyr        * 1.1.3      2021-03-03 [1] CRAN (R 4.1.0)
+##  tidyselect     1.1.1      2021-04-30 [1] CRAN (R 4.1.0)
+##  tidyverse    * 1.3.1      2021-04-15 [1] CRAN (R 4.1.0)
+##  timeDate       3043.102   2018-02-21 [1] CRAN (R 4.1.0)
+##  tune         * 0.1.5      2021-04-23 [1] CRAN (R 4.1.0)
+##  usethis        2.0.1      2021-02-10 [1] CRAN (R 4.1.0)
+##  utf8           1.2.1      2021-03-12 [1] CRAN (R 4.1.0)
+##  vctrs          0.3.8      2021-04-29 [1] CRAN (R 4.1.0)
+##  withr          2.4.2      2021-04-18 [1] CRAN (R 4.1.0)
+##  workflows    * 0.2.2      2021-03-10 [1] CRAN (R 4.1.0)
+##  workflowsets * 0.0.2      2021-04-16 [1] CRAN (R 4.1.0)
+##  xfun           0.22       2021-03-11 [1] CRAN (R 4.1.0)
+##  xml2           1.3.2      2020-04-23 [1] CRAN (R 4.1.0)
+##  yaml           2.2.1      2020-02-01 [1] CRAN (R 4.1.0)
+##  yardstick    * 0.0.8      2021-03-28 [1] CRAN (R 4.1.0)
+##  zeallot        0.1.0      2018-01-28 [1] CRAN (R 4.1.0)
+## 
+## [1] /Library/Frameworks/R.framework/Versions/4.1-arm64/Resources/library</code></pre>
+</div>
+</div>
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn1"><p>Here’s an idea: use MLflow to track reports! Every report is an experiment, and every production of a report is a run.<a href="#fnref1" class="footnote-back">↩︎</a></p></li>
+</ol>
+</div>

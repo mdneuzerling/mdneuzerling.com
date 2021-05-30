@@ -7,7 +7,7 @@ categories: []
 tags: []
 images: ["/img/door-green-closed-lock.jpg"]
 featuredalt: 'a padlock chained across a green door'
-output: hugodown::md_document
+
 ---
 
 When I started this blog I wanted a way to share the quick little projects that distract me. I gave some thought to licencing, but I wanted to make sure that people could use my code if it had any value to them. This is just a little blog by a very unimportant guy---if someone got some use out of my code, I would be flattered!

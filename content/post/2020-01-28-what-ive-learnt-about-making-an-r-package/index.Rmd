@@ -8,7 +8,7 @@ tags:
     - R
 images: ["/img/boxes.jpg"]
 featuredalt: "Two small stacked carboard boxes stacked. This image is used under the Simplified Pixabay License."
-output: hugodown::md_document
+
 ---
 
 The last few weeks have been all about R package development for me. First I was exploring GitHub actions with the lovely people at the [rOpenSci OzUnconf](https://ozunconf19.ropensci.org/), and then I was off to San Francisco to learn about [Building Tidy Tools with the Wickham siblings](https://github.com/rstudio-conf-2020/build-tidy-tools). I've picked up a lot about package development, so I'm documenting some of trickier things that I've learnt.

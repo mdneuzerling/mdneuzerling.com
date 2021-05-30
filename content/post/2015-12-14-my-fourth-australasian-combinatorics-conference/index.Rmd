@@ -8,7 +8,7 @@ tags:
   - maths
 images: ["/img/ACCMCC_UQ.jpg"]
 featuredalt: 'The University of Queensland'
-output: hugodown::md_document
+
 ---
 
 My first maths conference was The 36th Australasian Conference on Combinatorial Mathematics and Combinatorial Computing. I had just finished my honours thesis, <em>Generalising the Clique-Coclique Bound</em>, and I had travelled to Sydney to present my results to a room full of people much smarter than me.
