@@ -1,0 +1,139 @@
+---
+title: My First CRAN Package
+author: ~
+date: '2021-05-23'
+slug: my-first-cran-package
+tags:
+    - r
+images: ["/img/badges.png"]
+output: hugodown::md_document
+---
+    
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = TRUE, echo = TRUE)
+library(ptvapi)
+library(dplyr)
+
+options(width = 100)
+options(tibble.width = 100)
+
+set.seed(20210523)
+```
+
+For my first R package to submit to CRAN I chose something simple --- an API wrapper around [my state's public transport API](https://www.ptv.vic.gov.au/footer/data-and-reporting/datasets/ptv-timetable-api/). It's not the most exciting contribution to open source code, but you can learn a lot by writing an API wrapper.
+
+```{r routes-head}
+routes() |> group_by(route_type) |> sample_n(2)
+```
+
+### Ease of use is everything
+
+API wrappers don't introduce new functionality; there's nothing stopping 
+
+### Caching is a good idea
+
+
+### Authentication is hard
+
+
+
+### CRAN is fun
+
+### URL parameters are tricky
+
+* System for `?` and `&`
+* `TRUE` becomes `true` (maybe, can't assume this for all APIs)
+* I implemented a system such that `NULL`s aren't included
+
+```{r add-parameter}
+add_parameter <- function(
+  request,
+  parameter_name,
+  parameter_value,
+  .combine = "repeat_name"
+) {
+  if (is.null(parameter_value) || length(parameter_value) == 0) {
+    return(request)
+  }
+
+  if (length(parameter_value) == 1) {
+    conjunction <- ifelse(grepl("\\?", request), "&", "?")
+    if (is.logical(parameter_value)) {
+      parameter_value <- ifelse(parameter_value, "true", "false")
+    }
+    glue::glue("{request}{conjunction}{parameter_name}={parameter_value}")
+  } else if (.combine == "repeat_name") {
+    for (value in parameter_value) {
+      request <- add_parameter(
+        request,
+        parameter_name,
+        value,
+        .combine = .combine
+      )
+    }
+    request
+  } else if (.combine == "with_commas") {
+    add_parameter(request, parameter_name, parameter_value, .combine = ",")
+  } else if (.combine == "with_hex_commas") {
+    add_parameter(request, parameter_name, parameter_value, .combine = "%2C")
+  } else {
+    combined_value <- paste(parameter_value, collapse = .combine)
+    add_parameter(request, parameter_name, combined_value)
+  }
+}
+```
+
+To make life easier, I can append multiple parameters at once with `add_parameters`. This lets me specify each parameter as a function argument, so `add_parameters(request, x = "y")` is equivalent to `add_parameter(request, "x", "y")`.
+
+```{r add-parameters}
+add_parameters <- function(request, ..., .combine = "repeat_name") {
+  dots <- list(...)
+  dots_names <- names(dots)
+  for (i in seq_along(dots)) {
+    dot_name <- dots_names[i]
+    dot_value <- dots[[i]]
+    if (is.null(dot_name) || dot_name == "") stop("Parameters must be named")
+    # add_parameter will error if dot_value if not a singletons, and will
+    # return the request unaltered if dot_value is NULL
+    request <- add_parameter(request, dot_name, dot_value, .combine = .combine)
+  }
+  request
+}
+```
+
+Some examples to see this all put together:
+
+```{r add-parameter-examples}
+add_parameters(
+  "www.example.com",
+  animal = "crocodile"
+)
+add_parameters(
+  "www.example.com",
+  animal = "crocodile",
+  food = "cherries",
+  red_pandas_are_cute = TRUE,
+  colour = NULL
+)
+add_parameters(
+  "www.example.com",
+  animal = "crocodile",
+  numbers = c(1, 2, 3),
+  .combine = "repeat_name"
+)
+```
+
+### CI/CD is essential
+
+
+### Types are important
+
+
+### Badges are cute
+
+***
+Thank you to Phizz Leeder for creating the `ptvapi` hex logo.
+
+```{r sessioninfo, eval=TRUE}
+devtools::session_info()
+```
