@@ -1,8 +1,8 @@
 ---
-title: Predicting the Popularity of Animal Crossing Villagers with Google Cloud Vision
+title: Investigating the Popularity of Animal Crossing Villagers with Google Cloud Vision
 author: ~
 date: '2021-06-06'
-slug: predicting-the-popularity-of-animal-crossing-villagers-with-google-cloud-vision
+slug: investigating-the-popularity-of-animal-crossing-villagers-with-google-cloud-vision
 tags:
     - r
 images: ["/img/animal-crossing.png"]
