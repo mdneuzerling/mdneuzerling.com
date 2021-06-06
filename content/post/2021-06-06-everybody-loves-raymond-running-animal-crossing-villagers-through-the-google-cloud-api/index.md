@@ -1,13 +1,13 @@
 ---
-title: Predicting the Popularity of Animal Crossing Villagers with Google Cloud Vision
+title: "Everybody Loves Raymond: Running Animal Crossing Villagers through the Google Vision API"
 author: ~
 date: '2021-06-06'
-slug: predicting-the-popularity-of-animal-crossing-villagers-with-google-cloud-vision
+slug: everybody-loves-raymond-running-animal-crossing-villagers-through-the-google-cloud-api
 tags:
     - r
 images: ["/img/animal-crossing.png"]
 output: hugodown::md_document
-rmd_hash: c497d4d6a7f974d1
+rmd_hash: 67e36dc5a52fdb7e
 
 ---
 

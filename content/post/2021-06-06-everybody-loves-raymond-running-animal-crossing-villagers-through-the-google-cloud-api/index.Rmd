@@ -1,8 +1,8 @@
 ---
-title: Investigating the Popularity of Animal Crossing Villagers with Google Cloud Vision
+title: "Everybody Loves Raymond: Running Animal Crossing Villagers through the Google Vision API"
 author: ~
 date: '2021-06-06'
-slug: investigating-the-popularity-of-animal-crossing-villagers-with-google-cloud-vision
+slug: everybody-loves-raymond-running-animal-crossing-villagers-through-the-google-cloud-api
 tags:
     - r
 images: ["/img/animal-crossing.png"]
