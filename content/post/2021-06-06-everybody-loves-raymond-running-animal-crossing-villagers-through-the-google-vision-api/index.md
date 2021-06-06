@@ -2,12 +2,12 @@
 title: "Everybody Loves Raymond: Running Animal Crossing Villagers through the Google Vision API"
 author: ~
 date: '2021-06-06'
-slug: everybody-loves-raymond-running-animal-crossing-villagers-through-the-google-cloud-api
+slug: everybody-loves-raymond-running-animal-crossing-villagers-through-the-google-vision-api
 tags:
     - r
 images: ["/img/animal-crossing.png"]
 output: hugodown::md_document
-rmd_hash: 67e36dc5a52fdb7e
+rmd_hash: 0c1d8a77e8b8712f
 
 ---
 
