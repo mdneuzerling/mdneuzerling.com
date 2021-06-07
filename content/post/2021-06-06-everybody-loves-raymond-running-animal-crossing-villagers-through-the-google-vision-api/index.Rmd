@@ -13,7 +13,7 @@ output: hugodown::md_document
 knitr::opts_chunk$set(eval = TRUE, cache = TRUE)
 ```
 
-_Animal Crossing: New Horizons_ kept me sane throughout the first Melbourne lockdown of 2020. Now, in lockdown 4, it seems right that I should look back at this cheerful, relaxing game and do some data stuff. I'm going to take the _Animal Crossing_ villagers in the [Tidy Tuesday Animal Crossing dataset](https://github.com/rfordatascience/tidytuesday/blob/master/data/2020/2020-05-05/readme.md) and combine it with survey data from the [Animal Crossing Portal](https://www.animalcrossingportal.com/games/new-horizons/guides/villager-popularity-list.php#/), giving each villager a measure of popularity. I'll use the [Google Cloud Vision API](https://cloud.google.com/vision) to annotate each of the villager thumbnails, and with these train a pretty poor model of villager popularity.
+_Animal Crossing: New Horizons_ kept me sane throughout the first Melbourne COVID lockdown. Now, in lockdown 4, it seems right that I should look back at this cheerful, relaxing game and do some data stuff. I'm going to take the _Animal Crossing_ villagers in the [Tidy Tuesday Animal Crossing dataset](https://github.com/rfordatascience/tidytuesday/blob/master/data/2020/2020-05-05/readme.md) and combine it with survey data from the [Animal Crossing Portal](https://www.animalcrossingportal.com/games/new-horizons/guides/villager-popularity-list.php#/), giving each villager a measure of popularity. I'll use the [Google Cloud Vision API](https://cloud.google.com/vision) to annotate each of the villager thumbnails, and with these train a a (pretty poor) model of villager popularity.
 
 ```{r packages, message=FALSE, warning=FALSE}
 library(tidyverse)
@@ -372,8 +372,6 @@ fitted_xgboost_workflow <- xgboost_workflow %>%
 ```
 
 It's time to see just how bad this model is. Recall that I took the `log` of the popularity in the training data, so to truly evaluate the performance I have to take the `exp` of the predictions. 
-
-There's an underlying question here that I don't have an immediate answer for --- is minimising the root mean squared error of `log(popularity)` the same as minimising the root mean squared error of `popularity`? I suspect the distinction isn't too important here.
 
 ```{r evaluate-model}
 test_performance <- test %>% 

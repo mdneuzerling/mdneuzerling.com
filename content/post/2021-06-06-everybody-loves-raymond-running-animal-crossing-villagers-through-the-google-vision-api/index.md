@@ -7,11 +7,11 @@ tags:
     - r
 images: ["/img/animal-crossing.png"]
 output: hugodown::md_document
-rmd_hash: 0c1d8a77e8b8712f
+rmd_hash: a5e4cb308efac501
 
 ---
 
-*Animal Crossing: New Horizons* kept me sane throughout the first Melbourne lockdown of 2020. Now, in lockdown 4, it seems right that I should look back at this cheerful, relaxing game and do some data stuff. I'm going to take the *Animal Crossing* villagers in the [Tidy Tuesday Animal Crossing dataset](https://github.com/rfordatascience/tidytuesday/blob/master/data/2020/2020-05-05/readme.md) and combine it with survey data from the [Animal Crossing Portal](https://www.animalcrossingportal.com/games/new-horizons/guides/villager-popularity-list.php#/), giving each villager a measure of popularity. I'll use the [Google Cloud Vision API](https://cloud.google.com/vision) to annotate each of the villager thumbnails, and with these train a pretty poor model of villager popularity.
+*Animal Crossing: New Horizons* kept me sane throughout the first Melbourne COVID lockdown. Now, in lockdown 4, it seems right that I should look back at this cheerful, relaxing game and do some data stuff. I'm going to take the *Animal Crossing* villagers in the [Tidy Tuesday Animal Crossing dataset](https://github.com/rfordatascience/tidytuesday/blob/master/data/2020/2020-05-05/readme.md) and combine it with survey data from the [Animal Crossing Portal](https://www.animalcrossingportal.com/games/new-horizons/guides/villager-popularity-list.php#/), giving each villager a measure of popularity. I'll use the [Google Cloud Vision API](https://cloud.google.com/vision) to annotate each of the villager thumbnails, and with these train a a (pretty poor) model of villager popularity.
 
 <div class="highlight">
 
@@ -482,8 +482,6 @@ I'll use whichever `mtry` and `tree_depth` parameters minimise root mean-squared
 
 It's time to see just how bad this model is. Recall that I took the `log` of the popularity in the training data, so to truly evaluate the performance I have to take the `exp` of the predictions.
 
-There's an underlying question here that I don't have an immediate answer for --- is minimising the root mean squared error of [`log(popularity)`](https://rdrr.io/r/base/Log.html) the same as minimising the root mean squared error of `popularity`? I suspect the distinction isn't too important here.
-
 <div class="highlight">
 
 <pre class='chroma'><code class='language-r' data-lang='r'><span class='nv'>test_performance</span> <span class='o'>&lt;-</span> <span class='nv'>test</span> <span class='o'>%&gt;%</span> 
@@ -588,7 +586,7 @@ The *Animal Crossing* franchise and its fictional characters are the property of
 <span class='c'>#&gt;  collate  en_AU.UTF-8                 </span>
 <span class='c'>#&gt;  ctype    en_AU.UTF-8                 </span>
 <span class='c'>#&gt;  tz       Australia/Melbourne         </span>
-<span class='c'>#&gt;  date     2021-06-06                  </span>
+<span class='c'>#&gt;  date     2021-06-07                  </span>
 <span class='c'>#&gt; </span>
 <span class='c'>#&gt; ─ Packages ───────────────────────────────────────────────────────────────────</span>
 <span class='c'>#&gt;  package      * version    date       lib source                         </span>
