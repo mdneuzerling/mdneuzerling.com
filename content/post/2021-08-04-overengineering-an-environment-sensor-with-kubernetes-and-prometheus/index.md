@@ -1,5 +1,5 @@
 ---
-title: "Overengineering an Environment Sensor with Kubernetes and Prometheus"
+title: "Over-engineering an Environment Sensor with Kubernetes and Prometheus"
 author: ~
 date: '2021-08-04'
 slug: overengineering-an-environment-sensor-with-kubernetes-and-prometheus
