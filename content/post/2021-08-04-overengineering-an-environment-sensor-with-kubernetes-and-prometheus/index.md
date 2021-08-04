@@ -15,7 +15,7 @@ And it's pretty cool to open up a browser and go to `starfleet:30001` to see thi
 
 ![](environment-dashboard.png)
 
-[I've explored Kubernetes once before, when I used it to host an R API made with Plumber](/post/hosting-a-plumber-api-with-kubernetes/). In that post I used a cluster hosted on GCP. This time I'm cobbling the cluster together myself.
+[I've explored Kubernetes once before, when I used it to host an R API made with Plumber](/post/hosting-a-plumber-api-with-kubernetes/). In that post I used a cluster hosted on Google Cloud Platform. This time I'm cobbling the cluster together myself.
 
 ## The setup
 
