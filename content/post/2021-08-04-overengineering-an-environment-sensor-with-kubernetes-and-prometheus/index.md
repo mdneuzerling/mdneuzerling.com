@@ -9,7 +9,7 @@ tags:
 images: ["/img/environment.png"]
 ---
 
-One of the joys of keeping a personal blog is that you don't have to justify anything. If I want to hook up 4 Raspberry Pis into a Kubernetes cluster just to monitor the humidity of my living room, then I can.
+One of the joys of keeping a personal blog is that I don't have to justify a post. If I want to hook up 4 Raspberry Pis into a Kubernetes cluster just to monitor the humidity of my living room, then I can.
 
 And it's pretty cool to open up a browser and go to `starfleet:30001` to see this:
 
