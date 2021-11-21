@@ -8,7 +8,7 @@ tags:
     - cloud
 images: ["/img/lambdr-banner.png"]
 output: hugodown::md_document
-rmd_hash: bee18390c08c40c1
+rmd_hash: dfa97e210ebe58f8
 
 ---
 
@@ -24,17 +24,17 @@ I'll go through the components in detail, but [the `runtime.R`, Dockerfile, and 
 
 An R runtime for *AWS Lambda* lets me put my R functions on the cloud without having to think about setting up a server to host them. My new package, [`lambdr`](https://lambdr.mdneuzerling.com), can be used to containerise functions with an R runtime for *Lambda*.
 
-The intention here is to create a function that takes a parameter from a Lambda invocation and uses it to knit a parametrised R Markdown report, which the function then returns as a string which can be interpreted as a HTML. I can wrap this with an API Gateway so that the whole thing can be called from a browser, as if I were visiting any other web page. Except behind that web page my Lambda container is knitting the report on-demand.
+The intention here is to create a function that takes a parameter from a Lambda invocation and uses it to knit a parametrised R Markdown report, which the function then returns as a string which can be interpreted as HTML. I can wrap this with an API Gateway so that the whole thing can be called from a browser, as if I were visiting any other web page. Except behind that web page my Lambda container is knitting the report on-demand.
 
 The core function of [`lambdr`](https://lambdr.mdneuzerling.com) is [`start_lambda`](https://lambdr.mdneuzerling.com/reference/start_lambda.html), which kicks off the runtime with an infinite cycle of waiting for an event to occur and then handling it as it comes. For basic purposes this is enough:
 
-1.  In a file, `runtime.R`. define or source the *handler function*, which is the R function that handles invocations of the Lambda. This file should end by running [`start_lambda()`](https://lambdr.mdneuzerling.com/reference/start_lambda.html)
+1.  In a file, `runtime.R`, define or source the *handler function*, which is the R function that handles invocations of the Lambda. This file should end by running [`start_lambda()`](https://lambdr.mdneuzerling.com/reference/start_lambda.html)
 2.  Containerise the `runtime.R` with the necessary components to serve the Lambda.
 3.  Either in the Dockerfile or the *AWS Lambda* console, declare the *handler function*.
 
 Along with the what I'm doing here, [I have a basic example in a vignette](https://lambdr.mdneuzerling.com/articles/lambda-runtime-in-container.html).
 
-`lambdr` attempts to handle the complexities of converting the invocation into arguments that can be passed to the handler function, and converting the response into something that `Lambda` expects. If this fails there is the option of providing a [`lambda_config`](https://lambdr.mdneuzerling.com/reference/lambda_config.html) to [`start_lambda`](https://lambdr.mdneuzerling.com/reference/start_lambda.html), which allows for a custom `deserialiser` and `serialiser`.
+`lambdr` attempts to handle the complexities of converting the invocation into arguments that can be passed to the handler function, and converting the response into something that *Lambda* expects. If this fails there is the option of providing a [`lambda_config`](https://lambdr.mdneuzerling.com/reference/lambda_config.html) to [`start_lambda`](https://lambdr.mdneuzerling.com/reference/start_lambda.html), which allows for a custom `deserialiser` and `serialiser`.
 
 The example in this post uses the [`html_response`](https://lambdr.mdneuzerling.com/reference/html_response.html) function which allows me to send a response tailored for an API Gateway. I need this to set the content type of the return as "text/html". This function isn't yet available in the version of `lambdr` on CRAN, but is available in the development version at [mdneuzerling/lambdr](https://github.com/mdneuzerling/lambdr/).
 
@@ -162,7 +162,7 @@ There is one last bit of configuration I need. It takes a few seconds to knit a 
 
 In the "Triggers" section under the "Configuration" tab of my Lambda, I can see the API endpoint. I copy and paste this endpoint into a browser and add the "?colour=H" parameter. Sure enough, my report pops up in a few seconds:
 
-[](diamonds-head.png)
+![](diamonds-head.png)
 
 ## Restrictions
 

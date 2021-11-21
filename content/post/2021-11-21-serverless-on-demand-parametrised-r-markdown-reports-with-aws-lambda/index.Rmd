@@ -165,7 +165,7 @@ There is one last bit of configuration I need. It takes a few seconds to knit a 
 
 In the "Triggers" section under the "Configuration" tab of my Lambda, I can see the API endpoint. I copy and paste this endpoint into a browser and add the "?colour=H" parameter. Sure enough, my report pops up in a few seconds:
 
-[](diamonds-head.png)
+![](diamonds-head.png)
 
 ## Restrictions
 
