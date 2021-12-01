@@ -1,8 +1,9 @@
 baseurl = "https://mdnuezerling.com"
-title = "Mainroad"
+title = "mdneuzerling"
 languageCode = "en-us"
 paginate = "10" # Number of posts per page
-theme = "mainroad"
+themesDir = "themes"
+theme = "Mainroad"
 disqusShortname = "" # Enable Disqus comments by entering your Disqus shortname
 googleAnalytics = "" # Enable Google Analytics by entering your tracking id
 
