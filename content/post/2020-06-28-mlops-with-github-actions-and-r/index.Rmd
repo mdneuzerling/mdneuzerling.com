@@ -3,9 +3,10 @@ title: MLOps with GitHub Actions and R
 author: ~
 date: '2020-06-28'
 slug: mlops-with-github-actions-and-r
+categories: [R]
 tags:
     - R
-images: ["/img/github-actions-comment.png"]
+thumbnail: "/img/github-actions-comment.png"
 featuredalt: |
     A comment on a GitHub Actions pull request, giving various numeric metrics.
     The commenter is "github-actions", and is labelled as a "bot".

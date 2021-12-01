@@ -3,9 +3,10 @@ title: Machine Learning Workflows with Julia
 author: ~
 date: '2021-03-01'
 slug: machine-learning-workflows-with-julia
+categories: [julia]
 tags:
     - julia
-images: ["/img/pokemon-total-stats.png"]
+thumbnail: "/img/pokemon-total-stats.png"
 output: hugodown::md_document
 rmd_hash: ac6627581459762f
 

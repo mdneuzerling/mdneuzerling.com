@@ -3,10 +3,11 @@ title: R on AWS Lambda with Containers
 author: ~
 date: '2020-12-06'
 slug: r-on-aws-lambda-with-containers
+categories: [R, cloud]
 tags:
-    - r
+    - R
     - cloud
-images: ["/img/successful-test.png"]
+thumbnail: "/img/successful-test.png"
 output: hugodown::md_document
 rmd_hash: c368cb533b80fac8
 

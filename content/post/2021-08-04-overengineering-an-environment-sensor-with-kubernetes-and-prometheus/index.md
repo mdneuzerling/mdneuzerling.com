@@ -3,10 +3,11 @@ title: "Over-engineering an Environment Sensor with Kubernetes and Prometheus"
 author: ~
 date: '2021-08-04'
 slug: overengineering-an-environment-sensor-with-kubernetes-and-prometheus
+categories: [python]
 tags:
     - python
     - kubernetes
-images: ["/img/environment.png"]
+thumbnail: "/img/environment.png"
 ---
 
 One of the joys of keeping a personal blog is that I don't have to justify a post. If I want to hook up 4 Raspberry Pis into a Kubernetes cluster just to monitor the humidity of my living room, then I can.

@@ -3,9 +3,10 @@ title: Deploying R Models with MLflow and Docker
 author: ~
 date: '2020-07-05'
 slug: deploying-r-models-with-mlflow-and-docker
+categories: [R]
 tags:
     - R
-images: ["/img/containers.jpeg"]
+thumbnail: "/img/containers.jpeg"
 featuredalt: |
     Shipping containers
 output: hugodown::md_document

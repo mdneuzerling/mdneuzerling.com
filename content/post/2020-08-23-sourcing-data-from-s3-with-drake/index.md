@@ -3,9 +3,10 @@ title: Sourcing Data from S3 with Drake
 author: ~
 date: '2020-08-23'
 slug: sourcing-data-from-s3-with-drake
+categories: [R]
 tags:
     - R
-images: ["/img/drake-etag.png"]
+thumbnail: "/img/drake-etag.png"
 output: hugodown::md_document
 rmd_hash: d2d2b287e25aef3a
 

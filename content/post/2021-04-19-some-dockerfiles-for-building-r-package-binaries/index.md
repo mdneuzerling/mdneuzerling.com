@@ -3,9 +3,10 @@ title: Some Dockerfiles for Building R Package Binaries
 author: ~
 date: '2021-04-19'
 slug: some-dockerfiles-for-building-r-package-binaries
+categories: [R]
 tags:
-    - r
-images: ["/img/lego-build.jpg"]
+    - R
+thumbnail: "/img/lego-build.jpg"
 output: hugodown::md_document
 rmd_hash: be71fd9c83705fb7
 

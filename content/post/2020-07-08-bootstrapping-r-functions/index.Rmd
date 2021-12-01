@@ -3,9 +3,10 @@ title: Bootstrapping R functions
 author: ~
 date: '2020-07-08'
 slug: bootstrapping-r-functions
+categories: [R]
 tags:
     - R
-images: ["/img/crime-scene.jpeg"]
+thumbnail: "/img/crime-scene.jpeg"
 featuredalt: |
     Tape that reads "Crime Scene".
 output: hugodown::md_document

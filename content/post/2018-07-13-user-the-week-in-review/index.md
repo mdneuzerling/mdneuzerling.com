@@ -3,9 +3,9 @@ title: 'useR: The Week in Review'
 author: ''
 date: '2018-07-13'
 slug: user-the-week-in-review
-categories: []
+categories: [R]
 tags: [R, conference]
-images: ["/img/useR/week_in_review.png"]
+thumbnail: "/img/useR/week_in_review.png"
 featuredalt: "useR2018 Week in Review"
 output: hugodown::md_document
 rmd_hash: ad077c06664f76d6

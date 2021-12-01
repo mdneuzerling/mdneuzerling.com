@@ -3,10 +3,10 @@ title: Using R to send an Outlook email with an inline image
 author: ~
 date: '2017-03-19'
 slug: using-r-to-send-an-outlook-email-with-an-inline-image
-categories: []
+categories: [R]
 tags: [R]
 description: ''
-images: ["/img/sending_an_email_with_rdcomclient.png"]
+thumbnail: "/img/sending_an_email_with_rdcomclient.png"
 featuredpath: 'img'
 output: hugodown::md_document
 rmd_hash: c2bf6750fbd8423d

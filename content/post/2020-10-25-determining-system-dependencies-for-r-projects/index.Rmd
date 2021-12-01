@@ -3,9 +3,10 @@ title: Determining system dependencies for R projects
 author: ~
 date: '2020-10-25'
 slug: determining-system-dependencies-for-r-projects
+categories: [R]
 tags:
     - R
-images: ["/img/dependencies.jpg"]
+thumbnail: "/img/dependencies.jpg"
 output: hugodown::md_document
 ---
     

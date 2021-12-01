@@ -3,11 +3,11 @@ title: Markdown monsters
 author: ''
 date: '2018-09-02'
 slug: markdown-monsters
-categories: []
+categories: [R]
 tags:
   - R
   - scraping
-images: ["/img/dice.jpg"]
+thumbnail: "/img/dice.jpg"
 featuredalt: "dice"
 output: hugodown::md_document
 rmd_hash: 21e10c59cb795420

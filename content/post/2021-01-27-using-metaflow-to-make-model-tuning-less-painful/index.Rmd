@@ -3,10 +3,11 @@ title: Using Metaflow to Make Model Tuning Less Painful
 author: ~
 date: '2021-01-27'
 slug: using-metaflow-to-make-model-tuning-less-painful
+categories: [R, cloud]
 tags:
     - r
     - cloud
-images: ["/img/metaflow-flow.png"]
+thumbnail: "/img/metaflow-flow.png"
 output: hugodown::md_document
 ---
     

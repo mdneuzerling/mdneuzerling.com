@@ -3,9 +3,10 @@ title: First Impressions of Julia from an R User
 author: ~
 date: '2020-09-16'
 slug: first-impressions-of-julia-from-an-r-user
+categories: [julia]
 tags:
     - julia
-images: ["/img/julia.png"]
+thumbnail: "/img/julia.png"
 output: hugodown::md_document
 ---
 

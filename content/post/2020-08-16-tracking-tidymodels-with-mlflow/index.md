@@ -3,9 +3,10 @@ title: Tracking Tidymodels with MLflow
 author: ~
 date: '2020-08-16'
 slug: tracking-tidymodels-with-mlflow
+categories: [R]
 tags:
     - R
-images: ["/img/mlflow-tracking.png"]
+thumbnail: "/img/mlflow-tracking.png"
 output: hugodown::md_document
 rmd_hash: 006bffda390fe1c4
 

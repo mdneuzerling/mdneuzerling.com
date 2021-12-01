@@ -3,10 +3,11 @@ title: My data science job hunt
 author: ''
 date: '2019-09-08'
 slug: my-data-science-job-hunt
+categories: [R]
 tags:
   - R
   - industry
-images: ["/img/job_outcomes.png"]
+thumbnail: "/img/job_outcomes.png"
 featuredalt: "job_outcomes"
 output: hugodown::md_document
 ---
