@@ -5,7 +5,7 @@ date: '2019-09-11'
 slug: an-update-on-copyright-and-licencing
 categories: []
 tags: []
-images: ["/img/door-green-closed-lock.jpg"]
+thumbnail: "/img/door-green-closed-lock.jpg"
 featuredalt: 'a padlock chained across a green door'
 output: hugodown::md_document
 rmd_hash: 0747d09ff3c7c1a0

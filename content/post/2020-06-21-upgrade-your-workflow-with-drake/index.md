@@ -3,9 +3,10 @@ title: Upgrade your workflow with drake
 author: ~
 date: '2020-06-21'
 slug: upgrade-your-workflow-with-drake
+categories: [R]
 tags:
     - R
-images: ["/img/drake-model-execution-plan.png"]
+thumbnail: "/img/drake-model-execution-plan.png"
 featuredalt: "A drake model execution plan"
 output: hugodown::md_document
 rmd_hash: fa9d87177a635cb5

@@ -3,10 +3,11 @@ title: "Serverless, On-Demand, Parametrised R Markdown Reports with AWS Lambda"
 author: ~
 date: '2021-11-21'
 slug: serverless-on-demand-parametrised-r-markdown-reports-with-aws-lambda
+categories: [R, cloud]
 tags:
-    - r
+    - R
     - cloud
-images: ["/img/lambdr-banner.png"]
+thumbnail: "/img/lambdr-banner.png"
 output: hugodown::md_document
 ---
 

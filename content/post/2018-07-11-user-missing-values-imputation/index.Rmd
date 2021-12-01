@@ -3,9 +3,9 @@ title: 'useR: Missing values imputation'
 author: ''
 slug: 'user-missing-values-imputation'
 date: '2018-07-11'
-categories: []
+categories: [R]
 tags: [R, conference]
-images: ["/img/useR/tutorial_three.png"]
+thumbnail: "/img/useR/tutorial_three.png"
 featuredalt: "useR2018 Tutorial Three"
 output: hugodown::hugo_document
 ---

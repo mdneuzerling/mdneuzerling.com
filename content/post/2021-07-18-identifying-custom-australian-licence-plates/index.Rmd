@@ -3,9 +3,10 @@ title: "Identifying Custom Australian Licence Plates"
 author: ~
 date: '2021-07-18'
 slug: identifying-custom-australian-licence-plates
+categories: [python]
 tags:
     - python
-images: ["/img/cars.jpg"]
+thumbnail: "/img/cars.jpg"
 output: hugodown::md_document
 ---
     

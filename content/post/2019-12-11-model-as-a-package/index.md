@@ -3,9 +3,10 @@ title: Model as a package
 author: ''
 date: '2019-12-11'
 slug: model-as-a-package
+categories: [R]
 tags:
     - R
-images: ["/img/ModelAsAPackage.png"]
+thumbnail: "/img/ModelAsAPackage.png"
 featuredalt: "Word cloud of review text"
 output: hugodown::md_document
 rmd_hash: 88295f1b09e321e6

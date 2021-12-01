@@ -3,10 +3,11 @@ title: Scraping wine colours with R
 author: ''
 date: '2018-07-01'
 slug: scraping-wine-colours-with-r
+categories: [R]
 tags:
     - R
     - scraping
-images: ["/img/grapes.jpeg"]
+thumbnail: "/img/grapes.jpeg"
 featuredalt: "grapes"
 output: hugodown::md_document
 rmd_hash: 7af88538483c1530

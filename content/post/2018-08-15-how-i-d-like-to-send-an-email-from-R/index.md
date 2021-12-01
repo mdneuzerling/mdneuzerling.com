@@ -3,10 +3,10 @@ title: How I'd like to send an email from R
 author: ''
 date: '2018-08-15'
 slug: how-i-d-like-to-send-an-email-from-R
-categories: []
+categories: [R]
 tags:
   - R
-images: ["/img/pipes.jpeg"]
+thumbnail: "/img/pipes.jpeg"
 featuredalt: "pipes"
 output: hugodown::md_document
 rmd_hash: d1668828e25cdf84

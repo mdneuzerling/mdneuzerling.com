@@ -3,9 +3,10 @@ title: Printing data frames with metadata
 author: ~
 date: '2020-05-19'
 slug: printing-data-frames-with-metadata
+categories: [R]
 tags:
     - R
-images: ["/img/flinders-departures.png"]
+thumbnail: "/img/flinders-departures.png"
 featuredalt: "A tibble of train departures from Flinders Street station"
 output: hugodown::md_document
 rmd_hash: 5d8f9bd540fd9e35

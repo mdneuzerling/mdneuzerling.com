@@ -3,10 +3,10 @@ title: What I've learnt about making an R package
 author: ''
 date: '2020-01-28'
 slug: what-ive-learnt-about-making-an-r-package
-categories: []
+categories: [R]
 tags:
     - R
-images: ["/img/boxes.jpg"]
+thumbnail: "/img/boxes.jpg"
 featuredalt: "Two small stacked carboard boxes stacked. This image is used under the Simplified Pixabay License."
 output: hugodown::md_document
 rmd_hash: 5396e888d442b2cc

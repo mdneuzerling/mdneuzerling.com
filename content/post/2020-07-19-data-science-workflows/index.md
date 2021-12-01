@@ -3,9 +3,10 @@ title: Data Science Workflows
 author: ~
 date: '2020-07-19'
 slug: data-science-workflows
+categories: [R]
 tags:
     - R
-images: ["/img/gears.jpg"]
+thumbnail: "/img/gears.jpg"
 featuredalt: Three interlocking metal gears
 output: hugodown::md_document
 rmd_hash: 5ca6353059f5f9e4

@@ -4,9 +4,9 @@ author: ''
 date: '2018-07-10'
 # weight: 2
 slug: user-getting-started-with-r-and-docker
-categories: []
+categories: [R]
 tags: [R, conference]
-images: ["/img/useR/tutorial_one.png"]
+thumbnail: "/img/useR/tutorial_one.png"
 featuredalt: "useR2018 Tutorial One"
 output: hugodown::hugo_document
 ---

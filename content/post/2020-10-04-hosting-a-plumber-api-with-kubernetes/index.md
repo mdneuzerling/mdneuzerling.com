@@ -3,9 +3,12 @@ title: Hosting a Plumber API with Kubernetes
 author: ~
 date: '2020-10-04'
 slug: hosting-a-plumber-api-with-kubernetes
+categories: [R, cloud]
 tags:
+    - R
     - kubernetes
-images: ["/img/kubernetes.png"]
+    - cloud
+thumbnail: "/img/kubernetes.png"
 output: hugodown::md_document
 rmd_hash: 7449ba08d2e45d42
 

@@ -3,9 +3,12 @@ title: "I Tried to Improve how Metaflow Converts R to Python (and I Failed)"
 author: ~
 date: '2021-09-19'
 slug: i-tried-to-improve-how-metaflow-converts-r-to-python-and-i-failed
+categories: [R, python]
 tags:
-    - r
-images: ["/img/brick-wall.jpg"]
+    - R
+    - python
+    - metaflow
+thumbnail: "/img/brick-wall.jpg"
 output: hugodown::md_document
 rmd_hash: ee64103bbd3293a7
 

@@ -3,10 +3,10 @@ title: My fourth Australasian Combinatorics Conference
 author: ''
 date: '2015-12-14'
 slug: my-fourth-australasian-combinatorics-conference
-categories: []
+categories: [maths]
 tags:
   - maths
-images: ["/img/ACCMCC_UQ.jpg"]
+thumbnail: "/img/ACCMCC_UQ.jpg"
 featuredalt: 'The University of Queensland'
 output: hugodown::md_document
 rmd_hash: 578c5c953091a4d9

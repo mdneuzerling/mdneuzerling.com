@@ -3,9 +3,10 @@ title: Machine Learning Pipelines with Tidymodels and Targets
 author: ~
 date: '2020-07-26'
 slug: machine-learning-pipelines-with-tidymodels-and-targets
+categories: [R]
 tags:
     - R
-images: ["/img/coffee-pipeline.png"]
+thumbnail: "/img/coffee-pipeline.png"
 output: hugodown::md_document
 ---
 
