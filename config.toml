@@ -7,6 +7,11 @@ theme = "Mainroad"
 disqusShortname = "" # Enable Disqus comments by entering your Disqus shortname
 googleAnalytics = "" # Enable Google Analytics by entering your tracking id
 
+[markup]
+  defaultMarkdownHandler = "goldmark"
+  [markup.goldmark.renderer]
+    unsafe = true
+
 [Author] # Used in authorbox
   name = "David Neuzerling"
   bio = "Data, R, Python"
