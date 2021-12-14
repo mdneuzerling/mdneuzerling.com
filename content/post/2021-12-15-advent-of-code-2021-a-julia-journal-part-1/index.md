@@ -14,7 +14,7 @@ output: hugodown::md_document
 
 [Advent of Code](https://adventofcode.com/) is an advent calendar for programming puzzles. I decided to tackle this year's set of 50 puzzles in Julia and journal my experiences along the way. I'm a beginner in Julia so I thought this would help me improve my skills.
 
-This post covers days 1 through 8.
+This post covers days 1 through 8. All of my solutions are [available on GitHub](https://github.com/mdneuzerling/advent_of_code/tree/main/AOC2021).
 
 # Advent of Code 2021: A Julia Journal
 
