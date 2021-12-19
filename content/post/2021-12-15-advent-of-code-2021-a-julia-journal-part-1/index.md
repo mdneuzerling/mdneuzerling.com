@@ -16,8 +16,6 @@ output: hugodown::md_document
 
 This post covers days 1 through 8.
 
-# Advent of Code 2021: A Julia Journal
-
 ## [Day 1: Increasing sequences](https://adventofcode.com/2021/day/1)
 
 > Count the number of times a depth measurement increases from the previous measurement
@@ -350,3 +348,7 @@ There's some subjectivity here. Some people despise seeing mathematical notation
 Strangely enough, `⊂` isn't defined in base Julia. The distinction between proper and non-proper subsetting isn't relevant for my code, though.
 
 I'm also piping into the `first` function which takes the first element of these sets (they're all singletons, so the first element is also the only element). Julia's native pipe is fairly basic, supporting only unary functions. More complicated piping can be achieved with the `Pipe` package, or the `Chain` package I used in day 1.
+
+---
+
+[The image at the top of this page is by Jessica Lynn Lewis](https://www.pexels.com/photo/white-notebook-and-pen-606539/) and is used under the terms of the [the Pexels License](https://www.pexels.com/license/).
