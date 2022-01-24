@@ -1,8 +1,8 @@
 ---
-title: "Machine Learning, Mistakes Included"
+title: "My Machine Learning Process (Mistakes Included)"
 author: ~
 date: '2022-01-24'
-slug: machine-learning-mistakes-included
+slug: my-machine-learning-process-mistakes-included
 categories: [R]
 tags:
     - R
@@ -16,7 +16,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 When I train a machine learning model in a blog post, I edit out all the mistakes. I make it seem like I had the perfect data I needed from the very start, and I never add a useless feature. This time, I want to train a model with all the mistakes and fruitless efforts included.'
 
-My goal here is to describe _the iterative process of creating a model_ rather than just presenting the final code. 
+My goal here is to describe _my process of creating a model_ rather than just presenting the final code.
 
 The material in this post is adapted from a presentation I gave to [the Deakin Girl Geeks student society of Deakin University](https://www.dusa.org.au/clubs/deakin-girl-geeks-dgg).
 
