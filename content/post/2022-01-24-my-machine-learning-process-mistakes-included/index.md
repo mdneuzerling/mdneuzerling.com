@@ -8,11 +8,11 @@ tags:
     - R
 thumbnail: "/img/mistake.jpg"
 output: hugodown::md_document
-rmd_hash: 8c2bebfb31258108
+rmd_hash: 8743f909ea5a0196
 
 ---
 
-When I train a machine learning model in a blog post, I edit out all the mistakes. I make it seem like I had the perfect data I needed from the very start, and I never add a useless feature. This time, I want to train a model with all the mistakes and fruitless efforts included.'
+When I train a machine learning model in a blog post, I edit out all the mistakes. I make it seem like I had the perfect data I needed from the very start, and I never add a useless feature. This time, I want to train a model with all the mistakes and fruitless efforts included.
 
 My goal here is to describe *my process of creating a model* rather than just presenting the final code.
 
@@ -1571,7 +1571,7 @@ I'm going to host the model in a separate R process so that it can serve predict
 <div class="highlight">
 
 <pre class='chroma'><code class='language-r' data-lang='r'><span class='nf'><a href='https://pins.rstudio.com/reference/board_folder.html'>board_local</a></span><span class='o'>(</span><span class='o'>)</span> <span class='o'><a href='https://magrittr.tidyverse.org/reference/pipe.html'>%&gt;%</a></span> <span class='nf'><a href='https://vetiver.tidymodels.org/reference/vetiver_pin_write.html'>vetiver_pin_write</a></span><span class='o'>(</span><span class='nv'>v</span><span class='o'>)</span>
-<span class='c'>#&gt; Creating new version '20220124T201040Z-328b8'</span>
+<span class='c'>#&gt; Creating new version '20220124T201636Z-f3f19'</span>
 <span class='c'>#&gt; Writing to pin 'pokemon_rf'</span>
 <span class='c'>#&gt; </span>
 <span class='c'>#&gt; Create a Model Card for your published model</span>

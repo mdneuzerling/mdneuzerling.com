@@ -14,7 +14,7 @@ output: hugodown::md_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-When I train a machine learning model in a blog post, I edit out all the mistakes. I make it seem like I had the perfect data I needed from the very start, and I never add a useless feature. This time, I want to train a model with all the mistakes and fruitless efforts included.'
+When I train a machine learning model in a blog post, I edit out all the mistakes. I make it seem like I had the perfect data I needed from the very start, and I never add a useless feature. This time, I want to train a model with all the mistakes and fruitless efforts included.
 
 My goal here is to describe _my process of creating a model_ rather than just presenting the final code.
 
