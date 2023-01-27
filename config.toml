@@ -74,7 +74,7 @@ googleAnalytics = "" # Enable Google Analytics by entering your tracking id
 [Params.widgets.social]
   # Enable parts of social widget
   facebook = ""
-  twitter = "mdneuzerling"
+  twitter = ""
   instagram = ""
   linkedin = "mdneuzerling"
   telegram = ""
