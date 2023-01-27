@@ -13,6 +13,8 @@ featuredalt: |
 output: hugodown::md_document
 ---
 
+**As of 2023 the material in this post no longer functions [due to changes in GitHub Actions](https://github.com/orgs/community/discussions/25989#).**
+
 Machine learning models get stuck at the deployment stage all the time. This stuff is hard.
 
 [GitHub Actions](https://help.github.com/en/actions) is a tool for automating tasks associated with a repository. I wanted to see if I could implement some sort of end-to-end automatic training, deployment and execution of a model. And I'm going to use R because people keep telling me that this sort of stuff can't be done with R.

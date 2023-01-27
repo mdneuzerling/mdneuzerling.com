@@ -11,9 +11,11 @@ featuredalt: |
     A comment on a GitHub Actions pull request, giving various numeric metrics.
     The commenter is "github-actions", and is labelled as a "bot".
 output: hugodown::md_document
-rmd_hash: 7bed5163094720b6
+rmd_hash: 7d682125794bfbd5
 
 ---
+
+**As of 2023 the material in this post no longer functions [due to changes in GitHub Actions](https://github.com/orgs/community/discussions/25989#).**
 
 Machine learning models get stuck at the deployment stage all the time. This stuff is hard.
 
@@ -27,10 +29,9 @@ I've put all of this into [a repository with a toy model](https://github.com/mdn
 
 I was inspired by a similar post on the [GitHub Blog](https://github.blog/2020-06-17-using-github-actions-for-mlops-data-science/) by [Hamel Husain](https://github.com/hamelsmu). Hamel used an external tool (Argo) to train the model, but I wanted to see if I could make do with just GitHub Actions and some persistent storage. I used S3, but I imagine any sort of cloud storage service would work here.
 
-Automated unit tests
---------------------
+## Automated unit tests
 
-I've created my model as an R package, using drake to define the model training and execution plans. Check out [my previous post on drake](/post/upgrade-your-workflow-with-drake/) for a little more detail about how this model is put together. In short, the model functions can be loaded with [`devtools::load_all()`](https://devtools.r-lib.org//reference/load_all.html), the plan specified with `training_plan()` or `execution_plan()`, and the run with [`drake::make`](https://docs.ropensci.org/drake/reference/make.html). But before we even get to that, there are unit tests on the functions in the package. I want these unit tests to run every time I push to the default *trunk* branch.
+I've created my model as an R package, using drake to define the model training and execution plans. Check out [my previous post on drake](/post/upgrade-your-workflow-with-drake/) for a little more detail about how this model is put together. In short, the model functions can be loaded with [`devtools::load_all()`](https://devtools.r-lib.org/reference/load_all.html), the plan specified with `training_plan()` or `execution_plan()`, and the run with `drake::make`. But before we even get to that, there are unit tests on the functions in the package. I want these unit tests to run every time I push to the default *trunk* branch.
 
 The `usethis` package makes this incredibly easy. If you've already set up git in your RStudio project, you can just run [`usethis::use_github_actions()`](https://usethis.r-lib.org/reference/github_actions.html) to set up a standard `R CMD check` on push and pull request, using a MacOS runner. It even automatically puts a status badge in your README. It's that easy, I swear.
 
@@ -64,7 +65,7 @@ The `usethis` package makes this incredibly easy. If you've already set up git i
 
 But I wanted to go a bit further and ensure I was creating a reproducible environment, and also using a Linux runner with a fast setup time.
 
-Reproducibility matters here, and that means we need to lock down the operating system, R version, and package versions. I've used [renv](https://rstudio.github.io/renv/) to lock down the package versions, and I'll specify the operating system and R version in the GitHub Actions workflows themselves. I initialise the `renv` lockfile and associated objects with [`renv::activate()`](https://rstudio.github.io/renv//reference/activate.html). By running [`renv::restore()`](https://rstudio.github.io/renv//reference/restore.html) I can install the packages with the exact same versions I used when developing my model locally.
+Reproducibility matters here, and that means we need to lock down the operating system, R version, and package versions. I've used [renv](https://rstudio.github.io/renv/) to lock down the package versions, and I'll specify the operating system and R version in the GitHub Actions workflows themselves. I initialise the `renv` lockfile and associated objects with [`renv::activate()`](https://rstudio.github.io/renv/reference/activate.html). By running [`renv::restore()`](https://rstudio.github.io/renv/reference/restore.html) I can install the packages with the exact same versions I used when developing my model locally.
 
 For most purposes, MacOS is a great candidate for a runner. But my development environment is Linux, and I wanted my workflows to match. Moreover, for billing in private repositories, 1 minute of a MacOS job is worth **10 minutes** of a Linux job. The problem with using a Linux runner is that R packages are installed from source, and that can take a long time. On a similar project, I was looking at a 32 minute `R CMD check` workflow on Linux, versus 4 minutes on MacOS!
 
@@ -117,13 +118,12 @@ Here's the workflow I settled on. Note also that I install system dependencies s
 
 For the most part, this action runs silently. If there's an error in the check, such as a failing unit test or the package can't be installed, then I'll get an email about it. I could even set up a requirement that this check must pass before I merge into the *production* branch.
 
-Model training
---------------
+## Model training
 
 This is the longest workflow. I need to accomplish the following:
 
 1.  Set up R as in the `R CMD check` workflow
-2.  Run [`drake::make`](https://docs.ropensci.org/drake/reference/make.html) on the training plan
+2.  Run `drake::make` on the training plan
 3.  Maintain a text file `bot-comment.txt` which contains the markdown for the pull request comment
 4.  Upload the ggplot to S3
 5.  Post the comment
@@ -218,7 +218,7 @@ This is the longest workflow. I need to accomplish the following:
               CANDIDATE_MODEL_KEY=$"$GITHUB_REPOSITORY/candidate-models/$COMMIT_HASH/candidate-model.tar.gz"
               aws s3api put-object --bucket "$S3_BUCKET" --key "$CANDIDATE_MODEL_KEY" --acl "public-read" --body "candidate-model.tar.gz"
 
-I want a common identifier for everything I'm doing here, and that's going to be a commit hash. I'll use it to identify model artefacts uploaded to S3, and as a heading in the pull request comment. If another commit is made while the PR is still open, then there will be a new hash to identify the new training run. To make sure that everything is entirely reproducible, I'll also use the commit hash as a random seed[^1] right before I run [`drake::make`](https://docs.ropensci.org/drake/reference/make.html). I'm using the commit hash of the pull request "head", which means nothing to me, but it matches the hash that I have in mind.
+I want a common identifier for everything I'm doing here, and that's going to be a commit hash. I'll use it to identify model artefacts uploaded to S3, and as a heading in the pull request comment. If another commit is made while the PR is still open, then there will be a new hash to identify the new training run. To make sure that everything is entirely reproducible, I'll also use the commit hash as a random seed[^1] right before I run `drake::make`. I'm using the commit hash of the pull request "head", which means nothing to me, but it matches the hash that I have in mind.
 
 The `bot-comment.txt` is a file maintained throughout. Variables aren't maintained between steps in a job, so a file is a good way to store data that needs to exist until the job is done. I initialise it with a heading with the commit hash, and then append the drake build history. This will give me an idea of what's taking time when the model is trained.[^2] I'll also append a confusion matrix and table of metrics created in the training plan. I use [`knitr::kable`](https://rdrr.io/pkg/knitr/man/kable.html) to convert R data frames to markdown tables.
 
@@ -238,8 +238,7 @@ Now we can post the comment. I found the [`machine-learning-apps/pr-comment`](ht
 
 Finally, I need to do something with the model I made. So far I've been using the `artefacts` directory to store everything related to the model. I tar it and upload it to S3 as a "candidate model", again using the commit hash as an identifier.
 
-Model deployment
-----------------
+## Model deployment
 
 Models are deployed when a pull request to the *production* branch is merged. I'm using a really basic form of "deployment" here --- the candidate model is copied to a specific object in S3. There are other tools out there to handle deployments (like, say, [through GitHub](https://developer.github.com/v3/guides/delivering-deployments/)) but I wanted to keep things simple and within the scope of GitHub Actions and S3.
 
@@ -275,10 +274,9 @@ There's a real risk here of accumulating a large number of candidate models. Mac
               PRODUCTION_MODEL_KEY=$"$GITHUB_REPOSITORY/production-model.tar.gz"
               aws s3api copy-object --bucket "$S3_BUCKET" --copy-source "$S3_BUCKET/$CANDIDATE_MODEL_KEY" --acl "public-read" --key "$PRODUCTION_MODEL_KEY"
 
-Model execution
----------------
+## Model execution
 
-Model execution is similar to model training. The production model is downloaded from S3 and untarred. This creates and populates the `artefact` folder to be exactly as it was after model training. From there, I run `execution_plan()` with [`drake::make`](https://docs.ropensci.org/drake/reference/make.html).
+Model execution is similar to model training. The production model is downloaded from S3 and untarred. This creates and populates the `artefact` folder to be exactly as it was after model training. From there, I run `execution_plan()` with `drake::make`.
 
     on:
       push:
@@ -349,8 +347,7 @@ This is very much a simulated process. The "new" data that comes in is just a se
 
 One of the triggers for this job is a schedule --- it runs every Monday at 12pm. So the model can actually be scheduled and executed entirely within GitHub Actions.
 
-Limitations in GitHub Actions
------------------------------
+## Limitations in GitHub Actions
 
 Don't let the below limitations discourage you from GitHub Actions. This is a very powerful and easy-to-use tool, and it's worth checking out. I'll certainly be using the `R CMD check` workflow for every R project I create from now on.
 
@@ -373,8 +370,7 @@ There's no persistent, easy storage for the ggplot image I attach in the pull re
 
 This last point is really minor, but I wouldn't mind a UI option for loading parameters that aren't secret into the workflows as environment variables. The best example here is S3-bucket: the name of my S3 bucket isn't really a secret, but I don't necessarily want to hardcode it into the workflows. I wouldn't mind an option that's similar to repository secrets, but not secret.
 
-Limitations in my approach
---------------------------
+## Limitations in my approach
 
 The major limitation in my approach here is that my model takes care of absolutely everything internally. I can't give my model new data to score, since it fetches new data itself. This doesn't seem like a big deal, but imagine if my model were an abstract service that I could give arbitrary data and get predictions out. Then I could create *challenger* models that are set up in the same way, and it would be easy to compare the performance of the two; a workflow could feed the same data to both the current (champion) model and the challenger model, and compare the outputs. It could comment on a pull request with metrics comparing the two models. It would make it much easier to compare, update, and replace models.
 
@@ -382,8 +378,7 @@ This would also open up a very powerful feature. The data behind this model is s
 
 This is magic stuff, right? But it requires models to be implemented as microservices. In other words, regardless of the internal workings of the model, I need to be able to feed the "training component" data and get a "model component" out of it. Regardless of the internal workings of the "model component", I need to be able to feed it new data and get predictions out of it. When a new model comes along, I should be able to unplug the old model and plug the new one in without any other changes. That doesn't sound easy to me.
 
-Serving machine learning models
--------------------------------
+## Serving machine learning models
 
 Python has "solved" this problem. Tools like [mlflow](https://mlflow.org/) and [kubeflow](https://www.kubeflow.org/) abstract away Python models exactly like that. There's supposedly R support (directly in mlflow and through [Seldon Core](https://www.seldon.io/tech/products/core/) with Kubeflow) but documentation and examples are hard to find. (My impression here is that these are Python tools, with token support for R, but **please** tell me if I'm wrong. I want to be wrong.)
 
@@ -397,62 +392,73 @@ I'm yet to see a fundamental reason why you can't put R models in production, de
 
 <div class="highlight">
 
-<pre class='chroma'><code class='language-r' data-lang='r'><span class='k'>devtools</span>::<span class='nf'><a href='https://rdrr.io/pkg/sessioninfo/man/session_info.html'>session_info</a></span>()
-<span class='c'>#&gt; ─ Session info ───────────────────────────────────────────────────────────────</span>
-<span class='c'>#&gt;  setting  value                       </span>
-<span class='c'>#&gt;  version  R version 4.0.0 (2020-04-24)</span>
-<span class='c'>#&gt;  os       Ubuntu 20.04 LTS            </span>
-<span class='c'>#&gt;  system   x86_64, linux-gnu           </span>
-<span class='c'>#&gt;  ui       X11                         </span>
-<span class='c'>#&gt;  language en_AU:en                    </span>
-<span class='c'>#&gt;  collate  en_AU.UTF-8                 </span>
-<span class='c'>#&gt;  ctype    en_AU.UTF-8                 </span>
-<span class='c'>#&gt;  tz       Australia/Melbourne         </span>
-<span class='c'>#&gt;  date     2020-06-30                  </span>
-<span class='c'>#&gt; </span>
-<span class='c'>#&gt; ─ Packages ───────────────────────────────────────────────────────────────────</span>
-<span class='c'>#&gt;  package     * version    date       lib source                            </span>
-<span class='c'>#&gt;  assertthat    0.2.1      2019-03-21 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  backports     1.1.8      2020-06-17 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  callr         3.4.3      2020-03-28 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  cli           2.0.2      2020-02-28 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  crayon        1.3.4      2017-09-16 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  desc          1.2.0      2018-05-01 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  devtools      2.3.0      2020-04-10 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  digest        0.6.25     2020-02-23 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  ellipsis      0.3.1      2020-05-15 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  evaluate      0.14       2019-05-28 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  fansi         0.4.1      2020-01-08 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  fs            1.4.1      2020-04-04 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  glue          1.4.1      2020-05-13 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  htmltools     0.5.0      2020-06-16 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  hugodown      0.0.0.9000 2020-06-20 [1] Github (r-lib/hugodown@f7df565)   </span>
-<span class='c'>#&gt;  knitr         1.28       2020-02-06 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  magrittr      1.5        2014-11-22 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  memoise       1.1.0.9000 2020-05-09 [1] Github (hadley/memoise@4aefd9f)   </span>
-<span class='c'>#&gt;  pkgbuild      1.0.7      2020-04-25 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  pkgload       1.0.2      2018-10-29 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  prettyunits   1.1.1      2020-01-24 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  processx      3.4.2      2020-02-09 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  ps            1.3.3      2020-05-08 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  R6            2.4.1      2019-11-12 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  remotes       2.1.1      2020-02-15 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  rlang         0.4.6      2020-05-02 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  rmarkdown     2.3.1      2020-06-20 [1] Github (rstudio/rmarkdown@b53a85a)</span>
-<span class='c'>#&gt;  rprojroot     1.3-2      2018-01-03 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  sessioninfo   1.1.1      2018-11-05 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  stringi       1.4.6      2020-02-17 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  stringr       1.4.0      2019-02-10 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  testthat      2.3.2      2020-03-02 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  usethis       1.6.1      2020-04-29 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  withr         2.2.0      2020-04-20 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  xfun          0.14       2020-05-20 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt;  yaml          2.2.1      2020-02-01 [1] CRAN (R 4.0.0)                    </span>
-<span class='c'>#&gt; </span>
-<span class='c'>#&gt; [1] /home/mdneuzerling/R/x86_64-pc-linux-gnu-library/4.0</span>
-<span class='c'>#&gt; [2] /usr/local/lib/R/site-library</span>
-<span class='c'>#&gt; [3] /usr/lib/R/site-library</span>
-<span class='c'>#&gt; [4] /usr/lib/R/library</span></code></pre>
+<pre class='chroma'><code class='language-r' data-lang='r'><span><span class='nf'>devtools</span><span class='nf'>::</span><span class='nf'><a href='https://r-lib.github.io/sessioninfo/reference/session_info.html'>session_info</a></span><span class='o'>(</span><span class='o'>)</span></span>
+<span><span class='c'>#&gt; <span style='color: #00BBBB; font-weight: bold;'>─ Session info ───────────────────────────────────────────────────────────────</span></span></span>
+<span><span class='c'>#&gt;  <span style='color: #555555; font-style: italic;'>setting </span> <span style='color: #555555; font-style: italic;'>value</span></span></span>
+<span><span class='c'>#&gt;  version  R version 4.2.1 (2022-06-23)</span></span>
+<span><span class='c'>#&gt;  os       macOS Big Sur 11.3</span></span>
+<span><span class='c'>#&gt;  system   aarch64, darwin20</span></span>
+<span><span class='c'>#&gt;  ui       X11</span></span>
+<span><span class='c'>#&gt;  language (EN)</span></span>
+<span><span class='c'>#&gt;  collate  en_AU.UTF-8</span></span>
+<span><span class='c'>#&gt;  ctype    en_AU.UTF-8</span></span>
+<span><span class='c'>#&gt;  tz       Australia/Melbourne</span></span>
+<span><span class='c'>#&gt;  date     2023-01-27</span></span>
+<span><span class='c'>#&gt;  pandoc   2.18 @ /Applications/RStudio.app/Contents/MacOS/quarto/bin/tools/ (via rmarkdown)</span></span>
+<span><span class='c'>#&gt; </span></span>
+<span><span class='c'>#&gt; <span style='color: #00BBBB; font-weight: bold;'>─ Packages ───────────────────────────────────────────────────────────────────</span></span></span>
+<span><span class='c'>#&gt;  <span style='color: #555555; font-style: italic;'>package    </span> <span style='color: #555555; font-style: italic;'>*</span> <span style='color: #555555; font-style: italic;'>version   </span> <span style='color: #555555; font-style: italic;'>date (UTC)</span> <span style='color: #555555; font-style: italic;'>lib</span> <span style='color: #555555; font-style: italic;'>source</span></span></span>
+<span><span class='c'>#&gt;  cachem        1.0.6      <span style='color: #555555;'>2021-08-19</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  callr         3.7.1      <span style='color: #555555;'>2022-07-13</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  cli           3.6.0      <span style='color: #555555;'>2023-01-09</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  crayon        1.5.2      <span style='color: #555555;'>2022-09-29</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  devtools      2.4.4      <span style='color: #555555;'>2022-07-20</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  digest        0.6.31     <span style='color: #555555;'>2022-12-11</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  ellipsis      0.3.2      <span style='color: #555555;'>2021-04-29</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  evaluate      0.20       <span style='color: #555555;'>2023-01-17</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  fastmap       1.1.0      <span style='color: #555555;'>2021-01-25</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  fs            1.6.0      <span style='color: #555555;'>2023-01-23</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  glue          1.6.2      <span style='color: #555555;'>2022-02-24</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  htmltools     0.5.4      <span style='color: #555555;'>2022-12-07</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  htmlwidgets   1.5.4      <span style='color: #555555;'>2021-09-08</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  httpuv        1.6.5      <span style='color: #555555;'>2022-01-05</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  hugodown      <span style='color: #BB00BB; font-weight: bold;'>0.0.0.9000</span> <span style='color: #555555;'>2023-01-26</span> <span style='color: #555555;'>[1]</span> <span style='color: #BB00BB; font-weight: bold;'>Github (r-lib/hugodown@f6f23dd)</span></span></span>
+<span><span class='c'>#&gt;  knitr         1.42       <span style='color: #555555;'>2023-01-25</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  later         1.3.0      <span style='color: #555555;'>2021-08-18</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  lifecycle     1.0.3      <span style='color: #555555;'>2022-10-07</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  magrittr      2.0.3      <span style='color: #555555;'>2022-03-30</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  memoise       2.0.1      <span style='color: #555555;'>2021-11-26</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  mime          0.12       <span style='color: #555555;'>2021-09-28</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  miniUI        0.1.1.1    <span style='color: #555555;'>2018-05-18</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  pkgbuild      1.3.1      <span style='color: #555555;'>2021-12-20</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  pkgload       1.3.0      <span style='color: #555555;'>2022-06-27</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  prettyunits   1.1.1      <span style='color: #555555;'>2020-01-24</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  processx      3.8.0      <span style='color: #555555;'>2022-10-26</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  profvis       0.3.7      <span style='color: #555555;'>2020-11-02</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  promises      1.2.0.1    <span style='color: #555555;'>2021-02-11</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  ps            1.7.2      <span style='color: #555555;'>2022-10-26</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  purrr         1.0.1      <span style='color: #555555;'>2023-01-10</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  R6            2.5.1      <span style='color: #555555;'>2021-08-19</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  Rcpp          1.0.10     <span style='color: #555555;'>2023-01-22</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  remotes       2.4.2      <span style='color: #555555;'>2021-11-30</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  rlang         1.0.6      <span style='color: #555555;'>2022-09-24</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  rmarkdown     2.20       <span style='color: #555555;'>2023-01-19</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  rstudioapi    0.14       <span style='color: #555555;'>2022-08-22</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  sessioninfo   1.2.2      <span style='color: #555555;'>2021-12-06</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  shiny         1.7.2      <span style='color: #555555;'>2022-07-19</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  stringi       1.7.12     <span style='color: #555555;'>2023-01-11</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  stringr       1.5.0      <span style='color: #555555;'>2022-12-02</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  urlchecker    1.0.1      <span style='color: #555555;'>2021-11-30</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  usethis       2.1.6      <span style='color: #555555;'>2022-05-25</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  vctrs         0.5.2      <span style='color: #555555;'>2023-01-23</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  xfun          0.36       <span style='color: #555555;'>2022-12-21</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  xtable        1.8-4      <span style='color: #555555;'>2019-04-21</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt;  yaml          2.3.7      <span style='color: #555555;'>2023-01-23</span> <span style='color: #555555;'>[1]</span> <span style='color: #555555;'>CRAN (R 4.2.0)</span></span></span>
+<span><span class='c'>#&gt; </span></span>
+<span><span class='c'>#&gt; <span style='color: #555555;'> [1] /Library/Frameworks/R.framework/Versions/4.2-arm64/Resources/library</span></span></span>
+<span><span class='c'>#&gt; </span></span>
+<span><span class='c'>#&gt; <span style='color: #00BBBB; font-weight: bold;'>──────────────────────────────────────────────────────────────────────────────</span></span></span>
+<span></span></code></pre>
 
 </div>
 
