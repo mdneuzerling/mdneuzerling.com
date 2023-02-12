@@ -160,7 +160,7 @@ commute_facts <- function(polygons, destination = workplace) {
     batch_end <- min(batch_start + batch_size - 1, n_polys)
     polygons_in_batch <- polygons[batch_start:batch_end]
     coords_in_batch <- polygons_in_batch %>% polygon_centroids()
-    response <- query_distance_matrix(coords_in_batch)
+    response <- query_distance_matrix(coords_in_batch, destination = destination)
 
     dplyr::as_tibble(polygons_in_batch) %>%
       cbind(coords_in_batch) %>%

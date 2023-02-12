@@ -8,7 +8,7 @@ tags:
     - R
 thumbnail: "/img/unimelb-commute-header.png"
 output: hugodown::md_document
-rmd_hash: 9efdb2932e0453fa
+rmd_hash: 42ab42af6f2e3e29
 
 ---
 
@@ -188,7 +188,7 @@ A single query to the Distance Matrix API can contain at most 25 origins, so thi
 <span>    <span class='nv'>batch_end</span> <span class='o'>&lt;-</span> <span class='nf'><a href='https://rdrr.io/r/base/Extremes.html'>min</a></span><span class='o'>(</span><span class='nv'>batch_start</span> <span class='o'>+</span> <span class='nv'>batch_size</span> <span class='o'>-</span> <span class='m'>1</span>, <span class='nv'>n_polys</span><span class='o'>)</span></span>
 <span>    <span class='nv'>polygons_in_batch</span> <span class='o'>&lt;-</span> <span class='nv'>polygons</span><span class='o'>[</span><span class='nv'>batch_start</span><span class='o'>:</span><span class='nv'>batch_end</span><span class='o'>]</span></span>
 <span>    <span class='nv'>coords_in_batch</span> <span class='o'>&lt;-</span> <span class='nv'>polygons_in_batch</span> <span class='o'><a href='https://magrittr.tidyverse.org/reference/pipe.html'>%&gt;%</a></span> <span class='nf'>polygon_centroids</span><span class='o'>(</span><span class='o'>)</span></span>
-<span>    <span class='nv'>response</span> <span class='o'>&lt;-</span> <span class='nf'>query_distance_matrix</span><span class='o'>(</span><span class='nv'>coords_in_batch</span><span class='o'>)</span></span>
+<span>    <span class='nv'>response</span> <span class='o'>&lt;-</span> <span class='nf'>query_distance_matrix</span><span class='o'>(</span><span class='nv'>coords_in_batch</span>, destination <span class='o'>=</span> <span class='nv'>destination</span><span class='o'>)</span></span>
 <span></span>
 <span>    <span class='nf'>dplyr</span><span class='nf'>::</span><span class='nf'><a href='https://tibble.tidyverse.org/reference/as_tibble.html'>as_tibble</a></span><span class='o'>(</span><span class='nv'>polygons_in_batch</span><span class='o'>)</span> <span class='o'><a href='https://magrittr.tidyverse.org/reference/pipe.html'>%&gt;%</a></span></span>
 <span>      <span class='nf'><a href='https://rdrr.io/r/base/cbind.html'>cbind</a></span><span class='o'>(</span><span class='nv'>coords_in_batch</span><span class='o'>)</span> <span class='o'><a href='https://magrittr.tidyverse.org/reference/pipe.html'>%&gt;%</a></span></span>
@@ -446,7 +446,7 @@ The resulting directory can be uploaded to any web server or static site hosting
 <span><span class='c'>#&gt;  collate  en_AU.UTF-8</span></span>
 <span><span class='c'>#&gt;  ctype    en_AU.UTF-8</span></span>
 <span><span class='c'>#&gt;  tz       Australia/Melbourne</span></span>
-<span><span class='c'>#&gt;  date     2023-01-27</span></span>
+<span><span class='c'>#&gt;  date     2023-02-12</span></span>
 <span><span class='c'>#&gt;  pandoc   2.18 @ /Applications/RStudio.app/Contents/MacOS/quarto/bin/tools/ (via rmarkdown)</span></span>
 <span><span class='c'>#&gt; </span></span>
 <span><span class='c'>#&gt; <span style='color: #00BBBB; font-weight: bold;'>─ Packages ───────────────────────────────────────────────────────────────────</span></span></span>
