@@ -1060,7 +1060,16 @@ echo "$ALL_CATEGORY" | sort -u | while IFS= read -r cat; do
         
         if [[ -n "$cat_posts" ]]; then
             cat_count=$(echo "$cat_posts" | wc -l | tr -d ' ')
+            cat_total_pages=$(( (cat_count + POSTS_PER_PAGE - 1) / POSTS_PER_PAGE ))
+            [[ $cat_total_pages -lt 1 ]] && cat_total_pages=1
+            
+            # Generate page 1
             generate_list_page "Category: $cat" "$cat_count posts in $cat" "$DIST_DIR/category/$cat_slug" "/category/$cat_slug" "$cat_posts" 1
+            
+            # Generate additional pages for pagination
+            for ((page=2; page<=cat_total_pages; page++)); do
+                generate_list_page "Category: $cat - Page $page" "$cat_count posts in $cat" "$DIST_DIR/category/$cat_slug/page/$page" "/category/$cat_slug" "$cat_posts" "$page"
+            done
         fi
     fi
 done
@@ -1088,7 +1097,16 @@ echo "$ALL_TAGS" | sort -u | while IFS= read -r tag; do
         
         if [[ -n "$tag_posts" ]]; then
             tag_count=$(echo "$tag_posts" | wc -l | tr -d ' ')
+            tag_total_pages=$(( (tag_count + POSTS_PER_PAGE - 1) / POSTS_PER_PAGE ))
+            [[ $tag_total_pages -lt 1 ]] && tag_total_pages=1
+            
+            # Generate page 1
             generate_list_page "Tag: #$tag" "$tag_count posts tagged with #$tag" "$DIST_DIR/tag/$tag_slug" "/tag/$tag_slug" "$tag_posts" 1
+            
+            # Generate additional pages for pagination
+            for ((page=2; page<=tag_total_pages; page++)); do
+                generate_list_page "Tag: #$tag - Page $page" "$tag_count posts tagged with #$tag" "$DIST_DIR/tag/$tag_slug/page/$page" "/tag/$tag_slug" "$tag_posts" "$page"
+            done
         fi
     fi
 done
