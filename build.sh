@@ -284,7 +284,7 @@ generate_footer() {
 EOF
     while IFS= read -r line; do
         if [[ -n "$line" ]]; then
-            echo "        <p>$(html_escape "$line")</p>"
+            echo "        <p>$line</p>"
         fi
     done <<< "$FOOTER_LINES"
     cat <<EOF
