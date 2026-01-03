@@ -8,6 +8,8 @@ execute:
 jupyter: false
 slug: wrangling-llm-output-with-langchain
 category: code
+tags:
+    - python
 featured: "/img/featured/skaven.webp"
 title: Wrangling LLM output with LangChain
 ---

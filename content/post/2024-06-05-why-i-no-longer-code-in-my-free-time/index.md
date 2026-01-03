@@ -4,6 +4,8 @@ author: ~
 date: '2024-06-05'
 slug: why-i-no-longer-code-in-my-free-time
 category: personal
+tags:
+    - meta
 featured: "/img/featured/revenants.webp"
 output: hugodown::md_document
 rmd_hash: a1306ec8052057a1

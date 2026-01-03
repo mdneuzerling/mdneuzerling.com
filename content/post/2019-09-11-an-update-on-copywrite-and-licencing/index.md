@@ -4,7 +4,8 @@ author: ''
 date: '2019-09-11'
 slug: an-update-on-copyright-and-licencing
 category: code
-tags: []
+tags:
+    - meta
 featured: "/img/featured/door-green-closed-lock.webp"
 featuredalt: 'a padlock chained across a green door'
 output: hugodown::md_document
