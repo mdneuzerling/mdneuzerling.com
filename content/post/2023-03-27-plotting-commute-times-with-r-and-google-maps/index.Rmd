@@ -1,0 +1,359 @@
+---
+title: "Plotting commute times with R and Google Maps"
+author: ~
+date: '2023-01-27'
+slug: plotting-commute-times-with-r-and-google-maps
+category: code
+tags:
+    - R
+featured: "/img/featured/unimelb-commute-header.webp"
+output: hugodown::md_document
+---
+    
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+```
+
+I'm house-hunting, and while I'd love to buy a 5-bedroom house with a pool 10 minutes walk from Flinders Street Station I probably can't afford that. So I need to take a broader look at Melbourne.
+
+One of the main constraints is commute time. I built a choropleth of commute times to the University of Melbourne and put it on top of a map of Melbourne.
+
+The rough idea is to create a fine hexagonal grid across the city using the `sf` package, and then to pass the centre of each hexagon through the Google Maps Directions Matrix API with the help of the (Melbourne-made) `googleway` package. The results are plotted with `leaflet` and [hosted for free on Netlify](https://unimelb-commutes.netlify.app/):
+
+```{r commute-widget, echo=FALSE}
+htmltools::tags$iframe(
+  src = "https://unimelb-commutes.netlify.app/",
+  height = "500px",
+  width = "100%",
+  `data-external` = "1"
+)
+```
+
+A warning if you want to recreate this for your own commute: the Distance Matrix API can end up costing a fair bit if you exceed the free tier. The above plot uses roughly 16K hexagons, although this can be adjusted by making the hexagons larger or querying fewer suburbs. Be sure to [review the API pricing](https://mapsplatform.google.com/pricing/). I'm not responsible for any API charges you incur.
+
+I am grateful to Belinda Maher, from whom I stole this idea.
+
+## Shape files and grids
+
+The starting point a shape file for the Melbourne metropolitan area which I obtained from [Plan Melbourne](https://www.planmelbourne.vic.gov.au/maps/spatial-data). It's a simple polygon that outlines the region.
+
+```{r melbourne-metro}
+metro <- sf::read_sf("Administrative/Metropolitan region_region.shp")
+plot(metro, main = "Melbourne")
+```
+
+The next step is to lay a grid of hexagons over the area. The centre of each hexagon will be used to determine commute time. More polygons means more granularity, but also a greater API cost.
+
+```{r melbourne-metro-grid-example}
+sf::st_make_grid(metro, cellsize = 0.1, square = FALSE)[metro] %>% plot()
+```
+
+These hexagons are a little too large for a useful map. I'll go with something much smaller. This covers the Melbourne metropolitan area with 170,000 hexagons:
+
+```{r melbourne-metro-grid}
+metro_grid <- sf::st_make_grid(metro, cellsize = 0.0025, square = FALSE)[metro]
+metro_grid
+```
+
+There are three ways to go from here:
+
+1. if your budget is unlimited, calculate the commute time for each suburb in 
+1. a search method. Starting with the hexagon containing the commute destination, calculate commute time. Then calculate the commute time for the neighbouring hexagons of that hexagon. When a hexagon has a commute time over a certain limit (say, 1 hour), stop computing the commute times of its neighbours.
+1. a suburb-by-suburb method. Using a shape file of suburbs, calculate commute time for the hexagons in each suburb one at a time, manually.
+
+I went with the suburb-by-suburb option here because I wanted to explore and get an idea of where I should be house-hunting. I used [Melbourne localities provided by data.gov.au](https://data.gov.au/data/dataset/af33dd8c-0534-4e18-9245-fc64440f742e) (the GDA94 version matches that of the Melbourne metro shape file). A quick function helps me get the hexagons in `metro_grid` that overlap any part of a suburb:
+
+```{r suburb-grid}
+localities <- sf::read_sf("vic_localities/vic_localities.shp")
+
+suburb_grid <- function(metro_grid, localities, suburb) {
+  assertthat::assert_that(suburb %in% localities$LOC_NAME)
+  suburb_shp <- localities %>% dplyr::filter(LOC_NAME == suburb)
+  grid_in_suburb <- metro_grid[suburb_shp]
+  assertthat::assert_that(length(grid_in_suburb) > 0)
+  grid_in_suburb
+}
+```
+
+The idea of taking a main set of hexagons (`metro_grid`) and then finding its intersection with a particular suburb is so that the hexagons in neighbouring suburbs tessellate.
+
+## Querying the Distance Matrix API
+
+For each hexagon I take its centre and use it as the origin of a Google Maps Distance Matrix query. The destination is a fixed location that represents the input of my commute. Each query uses only public transport and asks for an arrival before 9am on a Monday to capture the typical workday commute. I'm using the following constants:
+
+```{r constants}
+workplace <- c(144.9580, -37.8000)
+monday_morning <- as.POSIXct("2023-01-30 09:00:00", tz = "Australia/Melbourne")
+```
+
+I also need a helper function that converts a given set of hexagons into a matrix containing the coordinates of their centroids.
+
+```{r}
+polygon_centroids <- function(polygons) {
+  polygons %>% sf::st_centroid() %>% sf::st_coordinates()
+}
+```
+
+I use the `googleway` package to query the Distance Matrix API. I have a "GOOGLE_MAPS_API_KEY" environment variable defined with my API key. Follow [the instructions provided by Google](https://developers.google.com/maps/documentation/javascript/get-api-key), and be sure to enable the Distance Matrix API.
+
+There's an annoyance here in that Google expect latitude and longitude in a different order to the polygons I'm using. In my function I have a little hack for calculating `rev_origin`, which is the given `origin` but flipped. The origin is either a matrix of coordinates given by `polygon_centroids` or a vector representing a single origin point. 
+
+```{r query-distance-matrix}
+query_distance_matrix <- function(
+    origin,
+    destination = workplace,
+    arrival_time = monday_morning
+) {
+  rev_origin <- if (is.matrix(origin) && nrow(origin) == 1) {
+    c(origin[1,2], origin[1,1])
+  } else if (is.matrix(origin)) {
+    as.data.frame(origin[, c(2, 1)])
+  } else {
+    rev(origin)
+  }
+  response <- googleway::google_distance(
+    origins = rev_origin,
+    destinations = rev(destination),
+    mode = "transit",
+    arrival_time = arrival_time,
+    units = "metric",
+    key = Sys.getenv("GOOGLE_MAPS_API_KEY")
+  )
+  if (response$status != "OK") {
+    stop(response$error_message)
+  }
+  response
+}
+```
+
+I also need some helper functions for extracting useful information from the raw response. These provide `NA` values when Google cannot find a route, which is likely to happen for hexagons that fall on areas like airport runways.
+
+```{r googleway-helper-functions}
+dm_origin_address <- function(response) response$origin_addresses
+dm_matrix_response <- function(response) response$rows$elements
+dm_distance <- function(response) {
+  response %>% dm_matrix_response() %>% purrr::map_int(
+    function(x) ifelse(x$status == "OK", x$distance$value, NA_integer_)
+  )
+}
+dm_time <- function(response) {
+  response %>% dm_matrix_response() %>% purrr::map_int(
+    function(x) ifelse(x$status == "OK", x$duration$value, NA_integer_)
+  )
+}
+```
+
+## Gathering commute data
+
+A single query to the Distance Matrix API can contain at most 25 origins, so this function must batch the requests. Each batch of 25 (or fewer) is queried against the API. The results are turned into a data frame alongside the original hexagons, the coordinates of their centres, and the data from the helper functions I've defined. 
+
+```{r commute-facts}
+commute_facts <- function(polygons, destination = workplace) {
+  batch_size <- 25
+  n_polys <- polygons %>% length()
+  batches <- ceiling(n_polys / batch_size)
+
+  query_batch_number <- function(batch_number) {
+    batch_start <- batch_size * (batch_number - 1) + 1
+    batch_end <- min(batch_start + batch_size - 1, n_polys)
+    polygons_in_batch <- polygons[batch_start:batch_end]
+    coords_in_batch <- polygons_in_batch %>% polygon_centroids()
+    response <- query_distance_matrix(coords_in_batch, destination = destination)
+
+    dplyr::as_tibble(polygons_in_batch) %>%
+      cbind(coords_in_batch) %>%
+      dplyr::mutate(
+        origin = dm_origin_address(response),
+        commute_distance_m = dm_distance(response),
+        commute_time_s = dm_time(response),
+        commute_time = paste(round(commute_time_s / 60, 1), "minutes")
+      ) %>%
+      dplyr::as_tibble()
+  }
+
+  purrr::map_dfr(seq(batches), query_batch_number) %>% dplyr::distinct()
+}
+```
+
+And here is the function in action for Brunswick:
+
+```{r commute-facts-brunswick, cache=TRUE}
+grid_in_brunswick <- suburb_grid(metro_grid, localities, "Brunswick")
+brunswick_commute_facts <- commute_facts(grid_in_brunswick)
+brunswick_commute_facts
+```
+
+## Avoiding repetition
+
+If I try to calculate commute times for two adjacent suburbs, I'm going to have some overlap at the boundaries. API calls are expensive so it's worth making sure I don't query the same hexagon twice. The below function takes an existing data frame of commutes (like `brunswick_commute_facts` above) and adds commute facts from another suburb, being sure not to query data for any polygon I already know about.
+
+I'm not proud of my method for detecting overlaps here. I resort to several lines of `dplyr` but it feels like there must be an easier way,
+
+```{r expand-commute-facts}
+expand_commute_facts <- function(polygons, existing = NULL, destination = workplace) {
+  if (is.null(existing)) {
+    return(commute_facts(polygons, destination = destination))
+  }
+
+  polygon_df <- dplyr::as_tibble(polygon_centroids(polygons))
+  existing_df <- existing[c("X", "Y")] %>% dplyr::mutate(exists = TRUE)
+  existing_index <- polygon_df %>%
+    dplyr::left_join(existing_df, by = c("X", "Y")) %>%
+    dplyr::mutate(exists = ifelse(is.na(exists), FALSE, exists)) %>%
+    dplyr::pull(exists)
+  new_polygons <- polygons[!existing_index]
+
+  rbind(
+    existing,
+    commute_facts(new_polygons, destination = destination)
+  )
+}
+```
+
+I would then be able to add new commute facts like so:
+
+```{r fitzroy-and-brunswick, cache=TRUE}
+fitzroy_and_brunswick_commute_facts <- expand_commute_facts(
+    suburb_grid(metro_grid, localities, "Fitzroy"),
+    existing = brunswick_commute_facts
+)
+fitzroy_and_brunswick_commute_facts
+```
+
+## Map colours
+
+Before I get to visualising the hexagons I want to define the colour legend. Everyone has different tolerances for commuting, but in my case I decided to set everything above 1 hour as the same colour as that used for 1 hour. I also set everything below 20 minutes as the same colour as that used for 20 minutes. This means that --- for the purpose of the colour scale --- I need to "clamp" my commute times to between 20 and 60 minutes. That is, values below 20 minutes will be raised to 20 and values above 60 minutes will be lowered to 60. These limits will be passed to my plotting function as `min_value` and `max_value` arguments.
+
+```{r clamp-colours}
+# I wish this function was in base R
+clamp_values <- function(values, min_value = NULL, max_value = NULL) {
+  if (is.null(min_value)) min_value <- min(values, na.rm = TRUE)
+  if (is.null(max_value)) max_value <- max(values, na.rm = TRUE)
+
+  clamped_values <- values
+  clamped_values[values > max_value] <- max_value
+  clamped_values[values < min_value] <- min_value
+
+  clamped_values
+}
+```
+
+I can then define my colours using `leaflet`'s colour palette functions. I have the option of reversing the palette, which I default to `TRUE` because I have the "spectral" palette in mind. Without reversing, red would represent lower values and blue would represent higher values, which defies convention.
+
+```{r colour-palette}
+clamped_palette_function <- function(palette, values, min_value = NULL, max_value = NULL, reverse_palette = TRUE) {
+  clamped_values <- clamp_values(values, min_value, max_value)
+
+  leaflet::colorNumeric(
+    palette,
+    reverse = reverse_palette,
+    domain = min(clamped_values):max(clamped_values)
+  )
+}
+```
+
+## Map title
+
+Leaflet doesn't support titles out of the box (at least not through the R package, as far as I know). I adapted this solution from [StackOverflow](https://stackoverflow.com/a/72058737/8456369). It requires the creation of a CSS class for the title which can then be added to the Leaflet plot.
+
+```{r leaflet-title}
+leaflet_title_class <- htmltools::tags$style(htmltools::HTML("
+  .leaflet-control.map-title {
+    transform: translate(-50%,20%);
+    position: fixed !important;
+    left: 38%;
+    max-width: 50%;
+    text-align: center;
+    padding-left: 5px;
+    padding-right: 5px;
+    background: rgba(255,255,255,0.75);
+    font-weight: bold;
+    font-size: 1.0em;
+  }
+"))
+
+leaflet_title <- htmltools::tags$div(
+  leaflet_title_class,
+  htmltools::HTML("Public transport commute time to University of Melbourne<br>by David Neuzerling")
+)
+```
+
+## Leaflet plot
+
+With all of the pieces in place I can now define my `plot_commutes` function. The layers are built up:
+
+1. I first create the empty plot and add the title
+1. I add the actual map of Melbourne from OpenStreetMap
+1. I centre the map on the commute destination and set the zoom level
+1. I add the hexagon plot with the colour scale I defined earlier. By setting `weight = 0` I can remove the borders around each hexagon so that the colours blend a little. The labels will show the actual commute time when the user hovers over a hexagon (if on desktop) or taps on a hexagon (if on mobile).
+1. I add the legend, formatting the commute time (which is in seconds) as minutes
+
+```{r plot-commutes}
+plot_commutes <- function(
+    polygons,
+    colour_by,
+    destination = workplace,
+    min_value = 20 * 60,
+    max_value = 60 * 60
+) {
+  non_na_polygons <- dplyr::filter(polygons, !is.na(commute_time_s))
+
+  leaflet::leaflet() %>%
+    leaflet::addControl(leaflet_title, position = "topleft", className = "map-title") %>%
+    leaflet::addProviderTiles("OpenStreetMap") %>%
+    leaflet::setView(lng = destination[1], lat = destination[2], zoom = 11) %>%
+    leaflet::addPolygons(
+      data = sf::st_transform(non_na_polygons$geometry, "+proj=longlat +datum=WGS84"),
+      fillColor = clamped_palette(
+        "Spectral",
+        non_na_polygons$commute_time_s,
+        min_value = min_value,
+        max_value = max_value
+      ),
+      fillOpacity = 0.4,
+      weight = 0,
+      label = non_na_polygons$commute_time
+    ) %>%
+    leaflet::addLegend(
+      title = "commute time",
+      pal = clamped_palette_function(
+        "Spectral",
+        non_na_polygons$commute_time_s,
+        min_value = min_value,
+        max_value = max_value
+      ),
+      values = clamp_values(non_na_polygons$commute_time_s, min_value, max_value),
+      labFormat = leaflet::labelFormat(
+        suffix = " min",
+        transform = function(x) round(x / 60)
+      )
+    )
+}
+```
+
+## Saving the widget
+
+I use the `htmlwidgets` package to export the `leaflet` plot as a HTML site. Before doing so I need to define the "viewport" that allows mobile devices to properly display the map. Without this they would attempt to render the plot as if viewing on a desktop computer which would make the text far too small to read.
+
+```{r saving-the-widget}
+viewport <- htmltools::tags$meta(
+  name = "viewport",
+  content = "width=device-width, initial-scale=1.0"
+)
+
+save_commute_plot <- function(commute_plot, file_path) {
+  commute_plot %>%
+    htmlwidgets::prependContent(viewport) %>%
+    htmlwidgets::saveWidget(file_path)
+}
+```
+
+The resulting directory can be uploaded to any web server or static site hosting service, such as [Netlify](https://app.netlify.com).
+
+---
+
+```{r session-info}
+devtools::session_info()
+```

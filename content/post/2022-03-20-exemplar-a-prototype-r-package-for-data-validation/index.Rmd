@@ -1,0 +1,103 @@
+---
+title: "Exemplar: a prototype R package for data validation"
+author: ~
+date: '2022-03-20'
+slug: exemplar-a-prototype-r-package-for-data-validation
+category: code
+tags:
+    - R
+featured: "/img/featured/magnifying-glass.webp"
+output: hugodown::md_document
+---
+    
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load-exemplar-hidden, include=FALSE}
+library(exemplar)
+library(tidyselect)
+```
+
+I've been playing around with an idea for a new R package. I call it `exemplar` and here's how it works: I provide an example of what data should look like — an _exemplar_. The package gives a function that checks to make sure that any new data looks the same. The generated function checks — for each column — duplicate values, missing values, ranges, and more.
+
+The validation function doesn't have any dependencies at all. I need `exemplar` to generate it, but not to use it.
+
+In this post I'll give some examples of how it works and what sort of things are validated.
+
+I doubt I'll ever submit `exemplar` to CRAN. What I've done here isn't substantial enough to justify a CRAN submission, and it's a fairly niche tool. I'm happy to be convinced otherwise, but for now this will stay on Github and can be installed with:
+
+```{r install-exemplar, eval=FALSE}
+remotes::install_github("mdneuzerling/exemplar")
+```
+
+I'll also be using the `tidyselect` package for the examples below. I'll load that now. Most people never load this package directly, but it's one of the main components of `dplyr`.
+
+```{r load-tidyselect, eval=FALSE}
+library(tidyselect)
+```
+
+## Some examples
+
+The generated validation functions for data frames can get pretty long, since it includes checks for each column. To keep things brief I'll check just the `wt` and `mpg` columns of `mtcars`:
+
+```{r exemplar-mtcars-starts-with-d}
+exemplar(mtcars, wt, mpg)
+```
+
+It's pretty comprehensive! And the comments explain what's going on. I can take this function, modify it, and use it to check any new `mtcars`-like data.
+
+If any assertion is violated, an error is raised with the offending line of code. If everything checks out then `TRUE` is returned invisibly. There is a downside here, in that when a single assertion fails the function will not check the rest.
+
+In the above example I only checked the `wt` and `mpg` columns. When I'm validating data I often care about only a few columns. The `exemplar` function supports `tidyselect`, just like `dplyr`. All of the following will work:
+
+```{r tidyselect-examples, eval=FALSE}
+exemplar(mtcars, wt, mpg)
+exemplar(mtcars, -cyl)
+exemplar(mtcars, vs:carb)
+exemplar(mtcars, any_of(c("qsec", "notacolumn")))
+exemplar(mtcars, starts_with("d"))
+```
+
+The `exemplar` package also generates validation functions for individual vectors:
+
+```{r exemplar-mtcars-wt}
+exemplar(mtcars$wt)
+```
+
+Note how the validation function is named after the input. The function name can be specified with the `.function_suffix` parameter:
+
+```{r exemplar-mtcars-custom-name}
+exemplar(runif(100, -10, 10), .function_suffix = "random_numbers")
+```
+
+## What's validated?
+
+The intention is that users will take these validations as a starting point and make adjustments as needed. Some assertions will be commented out by default, with a comment explaining why.
+
+For a vector:
+
+* the data type is first checked
+* assertions for no missing or duplicate values are included, but if the input data violates these assertions then the statements will be commented out with an explanation
+* parity is checked. If the input is all positive, non-negative, negative, or non-positive, then an assertion for this will be included.
+* range assertions and deviance assertions (based on number of standard deviations from the mean, based on the input) are included, but commented out by default.
+
+Alternatively, range assertions can be enabled with the `.enable_range_assertions` argument and deviance assertions with `.enable_deviance_assertions`. By default the `.allowed_deviance` is 4, that is, new data can be within 4 standard deviations of the mean, based on the statistics of the exemplar. This too can be adjusted.
+
+Assertions for a data frame will include assertions for all of the selected columns, and will also check that those columns are present. There is also a validation that those columns are the _only_ columns present, but this will be disabled if `exemplar` is asked to create an `exemplar` on a selection of columns in the data frame.
+
+## How is this different to other data validation packages?
+
+If I have a clear idea of what to validate in a data frame, then I'll just write the assertions using `assertthat`. If those assertions are complicated then I'll use a package like `assertr`. 
+
+The `exemplar` package doesn't provide any additional tools for validating data. In fact, it's deliberately restricted to base R (≥ 3.5) to ensure that the generated functions don't require any installed packages.
+
+What `exemplar` does do is generate the validation functions automatically, based on an ideal output. This could be useful for, say, machine learning. Perhaps an `exemplar` is generated on training data and is used to validate test data, or any new data that needs to be scored.
+
+---
+
+[The image at the top of this page is by Tima Miroshnichenko](https://www.pexels.com/photo/black-magnifying-glass-beside-yellow-pencil-6615076/) and is used under the terms of [the Pexels License](https://www.pexels.com/license/).
+
+```{r session-info}
+devtools::session_info()
+```

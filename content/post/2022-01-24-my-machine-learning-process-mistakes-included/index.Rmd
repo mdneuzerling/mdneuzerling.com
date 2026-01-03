@@ -1,0 +1,678 @@
+---
+title: "My Machine Learning Process (Mistakes Included)"
+author: ~
+date: '2022-01-24'
+slug: my-machine-learning-process-mistakes-included
+category: code
+tags:
+    - R
+featured: "/img/featured/mistake.webp"
+output: hugodown::md_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+When I train a machine learning model in a blog post, I edit out all the mistakes. I make it seem like I had the perfect data I needed from the very start, and I never add a useless feature. This time, I want to train a model with all the mistakes and fruitless efforts included.
+
+My goal here is to describe _my process of creating a model_ rather than just presenting the final code.
+
+The material in this post is adapted from a presentation I gave to [the Deakin Girl Geeks student society of Deakin University](https://www.dusa.org.au/clubs/deakin-girl-geeks-dgg).
+
+## One of my favourite datasets: Pokémon
+
+This Pokémon data comes from [a gist prepared by GitHub user simsketch](https://gist.github.com/simsketch/1a029a8d7fca1e4c142cbfd043a68f19). I manually corrected the last few rows as suggested in the comments/
+
+```{r load-data, message=FALSE, warning=FALSE}
+library(tidyverse)
+
+pokemon <- read_csv("data/pokemon.csv") %>% 
+  janitor::clean_names() %>% 
+  mutate(
+    type1 = as.factor(type1),
+    type2 = as.factor(type2),
+    legendary = as.logical(legendary)
+  )
+
+pokemon %>% colnames
+```
+
+Pokémon have _types_ describing the elements or categories with which they are most closely affiliated. Charmander, for example, is a lizard with a perpetual flame on its tail and so is a _Fire_ Pokémon. There are 18 types in total.
+
+Pokémon also have _stats_ --- attributes that describe their strengths and weaknesses. These are usually abbreviated:
+
+* **hp**: _hit points_, a numerical representation of how much _health_ the Pokémon has
+* **atk**: determines how much _physical damage_ the Pokémon can deal
+* **sp. atk**: determines how much _special damage_ the Pokémon can deal. Some abilities (or _moves_) are more supernatural in nature, like a breath of fire or a bolt of thunder, and so are considered _special_.
+* **def**: _defence_, a Pokémon's capacity to resist physical damage.
+* **sp. def**: _special defence_, a Pokémon's capacity to resist special damage.
+* **spd**: _speed_, how quickly a Pokémon can attack.
+
+It makes sense then that a Fighting-type Pokémon might have stronger **atk** than a Fire-type Pokémon, whose moves are more likely to be _special_. The question is: from a Pokémon's stats or other features, can we determine its type? 
+
+## The advanced technique of actually looking at the data
+
+I'm not proud of this, but I often find myself writing many lines of exploratory code before I actually _look_ at the data. Due to its rarity, I call this an _advanced_ technique.
+
+Now that I have a question I'm trying to answer, the first step is to _look at the data_.
+
+```{r what-do-you-notice-1}
+pokemon %>%
+  select(number, name, type1, type2, hp:total, color) %>%
+  head() %>%
+  knitr::kable("html")
+```
+
+### Always ask: what does one row of the data represent?
+
+This is incredibly important --- if I don't know what one row of the data is, I can't progress any further. Those with database experience might ask a related question: what is the _primary key_?
+
+A reasonable assumption is that every row is a Pokémon, and this would be wrong.
+
+The Pokémon `number` seems like a good candidate here, but I can see that Venusaur and Mega Venusaur share a `number`. A mega evolution is a temporary transformation of a Pokémon. It seems that in the data I have here (and in the Pokémon universe more generally), mega evolutions are seen as variations of existing Pokémon.
+
+The question that follows is whether I should include these mega evolutions or discard them. I'm going to keep them for now, since I think they're still relevant to the hypothesis.
+
+I might then ask if `name` is a unique identifier, but this turns out to be false:
+
+```{r darmanitan}
+pokemon %>%
+  filter(name == "Darmanitan") %>%
+  select(number, name, type1, type2, hp:total, color) %>%
+  knitr::kable("html")
+```
+
+This happens because Darmanitan has multiple _forms_. Some of these have different stats, but some have identical stats and different types. A natural question might be if name, types, and stats are enough to make each row unique. This is wrong:
+
+```{r burmy}
+pokemon %>%
+  filter(name == "Burmy") %>%
+  select(number, name, type1, type2, hp:total, color) %>%
+  knitr::kable("html")
+```
+
+These forms usually have a different appearance, hence the difference in colour for these entries for Burmy. Indeed, this turns out to be the explanation I'm looking for. This has to be verified manually, by using the `janitor::get_dupes` function to investigate the dupes and looking up the Pokémon on [Bulbapedia](https://bulbapedia.bulbagarden.net).
+
+I'll keep all of these rows as. Different forms of the same Pokémon can sometimes have different stats so it makes sense to treat each form as a separate Pokémon.
+
+### Missing data and consistency
+
+I want to take another look at the data now to consider any missing values, and if there are any obvious errors in the values.
+
+```{r what-do-you-notice-2, echo=FALSE}
+pokemon %>%
+  select(number, name, type1, type2, hp:total, color) %>%
+  head() %>%
+  knitr::kable("html")
+```
+
+There are two things I notice here:
+
+* `type2` can be missing, but `type1` _appears_ to be present all the time (based on this very small sample). Are there any Pokémon without a type _at all_?
+* There's a `total` value, which I assume is the sum of all six stats. Is my assumption correct?
+
+### Validating data assumptions makes me feel safer
+
+I'll implement a quick function to validate this data, answering my two questions above.
+
+```{r data-assertions, message=FALSE, warning=FALSE}
+validate_pokemon <- function(pokemon_data) {
+  total_mismatch <- with(
+    pokemon_data, 
+    total != hp + atk + def + sp_atk + sp_def + spd
+  )
+  
+  important_columns <- pokemon_data %>% select(type1, hp:atk)
+  
+  !any(total_mismatch) && !any(is.na(important_columns))
+}
+
+validate_pokemon(pokemon)
+```
+
+Looks good! In a "real" situation I would go into much more detail, looking for as many potential problems as I can think of (for example, is `color` always present?). But combining all that logic into a single validation function is a good step, because I can insert this into any pipelines as a necessary step.
+
+## Plot the data. Always.
+
+Exploratory Data Analysis is about getting comfortable with the data. There's no algorithm for it. While I'm making only two graphs here, in a "real" situation this would be dozens of graphs (each with multiple failed attempts).
+
+### Does more stats mean more powerful?
+
+I'll consider the `total` stat amount, and determine if it actually does represent a Pokémon's strength. Certain Pokémon are considered "legendary" --- rare and more powerful than the average Pokémon. It makes sense that legendary Pokémon would have, on average, a higher `total` stat. And sure enough:
+
+```{r stat-density-by-legendary}
+pokemon %>% 
+  ggplot(
+    aes(
+      x = total,
+      color = legendary
+    )
+  ) +
+  geom_density(size = 1) +
+  xlab("Total stats") +
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "top"
+  )
+```
+
+Sure enough, more stats means more powerful.
+
+### Does the hypothesis make sense?
+
+If my hypothesis is that stats matter to predict type, I should be able to plot something to show that this _makes sense_. I'm not looking for incontrovertible proof here. But if I can't find _something_, I may as well stop here.
+
+Hypotheses don't come out of no where. Somewhere there's a anecdote or a feeling that a relationship exists before it's been formally investigated. In businesses that often comes from a domain expert --- someone who isn't necessarily an expert on data, but who knows the domain of the data better than any data scientist.
+
+In this case, I've played enough Pokémon to know that Fire Pokémon tend to favour special attack and Fighting Pokémon favour (physical) attack.
+
+```{r fire-fighting-stats-plot}
+pokemon %>% 
+  filter(
+    type1 %in% c(
+      "Fire", "Fighting"
+    )
+  ) %>% 
+  ggplot(aes(
+      x = atk,
+      y = sp_atk,
+      color = type1
+  )) +
+  geom_point(size = 2) + 
+  scale_color_manual(
+    values = c(
+      "Fire" = "#F8766D",
+      "Fighting" = "#00BFC4"
+    )
+  )
+```
+
+There's a nice separation here that strongly suggests that --- for these two types, at least --- it's possible to use a Pokémon's stats to guess its primary type. I imagine drawing a in between the two groups as best I can, noting that there's no way to perfectly separate them. Depending on which side of the line the stats of a particular Pokémon falls I can classify it as either Fire or Fighting. 
+
+## Recap: What do I know?
+
+I haven't given much thought to modelling yet. I've identified a question based on the data's _domain_, and then I explored the data by asking questions and validating assumptions. Modelling comes into the process late.
+
+Here's what I know so far:
+
+* Pokémon have one or two types --- the primary (first) type is never missing
+* None of the stats are missing
+* `total` stats is a good measure of a Pokémon's strength
+* There's some relationship between primary type and stats
+
+It's not time to model just yet. First I need to...
+
+## Define a target metric
+
+**Before** I start training any models, I need to know the _target metric_ under which they'll be evaluated.
+
+This question is impossible to answer here; my model is never going to be _used_ for anything, so the choice of target metric can't be judged. So I'll keep it simple: under a candidate model, what percentage of type predictions are correct?
+
+In a "real" situation, I would have other concerns. I would be asking about what happens when I get the prediction wrong, and what the benefits are when I get it right. These questions have no meaning here (there is no cost and no benefit to a model that is never put into practice), but they're crucial in real-life data science.
+
+For example, consider a model that predicts the probability that it will rain. If I predict rain and get it wrong, I leave the house carrying an umbrella that I don't need --- no big deal. If I get it right, I get to keep my clothes dry. The cost of a false positive is small and the benefits of a true positive are high, so I might undervalue false negatives (by, say, carrying an umbrella at a 25% chance of rain instead of a 50% chance of rain).
+
+### What makes a model _good enough_?
+
+Now that I have my target metric, I need to know what counts as a good enough model. There's never a situation in which I have unlimited time to train the perfect model --- if nothing else, I'd get bored eventually. I need a stopping criterion.
+
+Sometimes this is defined by the problem itself. For example, I might be required to demonstrate a certain financial benefit. Or I might have a time constraint and so I need to base my decisions on the best model I'm able to train in a given time.
+
+Otherwise, for classification problems, I find it helps to consider a _naive algorithm_ which predicts the most common class every time. The proportion of the most common class is also known as the _no-information rate_.
+
+I need to calculate this rate _after_ I split my data, and base it on the training data alone. This prevents me from making judgments based on the test data, and lets me compare my model's performance to the no-information rate of the data it was trained on.
+
+The following function will calculate the no-information rate. The most common type is almost always Water, but this function doesn't assume that.
+
+```{r water-proportion}
+no_information_rate <- function(pokemon_data) {
+  pokemon_data %>%
+    count(type1) %>%
+    mutate(proportion = n / sum(n)) %>%
+    top_n(1, proportion) %>%
+    pull(proportion)
+}
+```
+
+I should aim to beat this metric (preferably by a few percent) to be be convinced that my model has actually learnt _something_.
+
+There are other criteria I need to pay attention too, though. I want to make sure that my predictions aren't concentrated on only one or two types. But with `r pokemon %>% distinct(type1) %>% nrow()` types and `r pokemon %>% nrow()` rows, this may be tough. At some point I need to confront the problem I've been ignoring up until now: the number of classes is very small compared to the number of data points!
+
+## Let's train a model!
+
+_Now_ I've done enough foundational work that I can train a model. I'm going to use the `tidymodels` meta-package, a favourite of mine:
+
+```{r tidymodels-attach, warning=FALSE, message=FALSE}
+library(tidymodels)
+```
+
+I love random forests so that's what I'll use. A "proper" approach here would be to use a technique like cross-validation or train-validate-test split to compare multiple models, including multiple hyperparameter configurations for each model type. But I'm glossing over that for this post.
+
+First, a simple train-test split. I'll train my model on `pokemon_train` and validate it on `pokemon_test`.
+
+```{r train-test-simple}
+set.seed(12345)
+pokemon_split <- initial_split(pokemon, strata = "type1", prop = 0.7)
+pokemon_train <- training(pokemon_split)
+pokemon_test <- testing(pokemon_split)
+
+nrow(pokemon_train)
+
+nrow(pokemon_test)
+```
+
+I now have a training set with `r nrow(pokemon_train)` rows and a test set with `r nrow(pokemon_test)` rows. I can use the function I prepared earlier to calculate the no-information rate.
+
+```{r simple-train-test-nir}
+no_information_rate(pokemon_train)
+```
+
+This serves as a benchmark for my model. Here's the definition of the model, created with the `parsnip` package:
+
+```{r pokemon_model, message=FALSE, warning=FALSE}
+pokemon_model <- rand_forest(
+    trees = 200,
+    mtry = 3
+  ) %>%
+  set_engine("ranger") %>% 
+  set_mode("classification")
+
+pokemon_model
+```
+
+At this point the model hasn't been fitted, so I had better fit it.
+
+## First attempt - a failure that looks like a success
+
+Data science is a string of failures and hopefully (but not always) a successful result. But I have to start with _a model_ so that I can iterate. So I'll fit my model and see how it performs:
+
+```{r first-model-fit, warning = FALSE}
+fitted_pokemon_model <- pokemon_model %>% fit(
+  type1 ~ hp + atk + def + sp_atk + sp_def + spd,
+  data = pokemon_train
+)
+
+first_attempt_accuracy <- pokemon_test %>% 
+  mutate(
+    predicted_type1 = predict(
+      fitted_pokemon_model,
+      pokemon_test
+    )$.pred_class
+  ) %>%
+  accuracy(type1, predicted_type1) %>% 
+  pull(.estimate)
+
+first_attempt_accuracy
+```
+
+What a great result! `r scales::percent(first_attempt_accuracy, 0.1)` accuracy is better than the no-information rate of `r scales::percent(no_information_rate(pokemon_train), 0.1)`. I'm clearly a great data scientist, and I can finally stop feeling insecure about my abilities.
+
+### Except that's not a good result
+
+A little pessimism is a good thing, and a good model should be met with scepticism. Doubly so if the model is a first attempt.
+
+_Data leakage_ is a situation in which data from the test set influences the training set, and so the model gets a peak into the test data that it shouldn't have. It can lead to _overfitting_, and it's sometimes extraordinarily difficult to detect.
+
+Do you remember when you trained your first stock market model and got 99% accuracy? You imagined your life on your private island? And then you realised (or someone told you) that you needed to split your data into into two time periods so that the model couldn't see the future? That was data leakage causing over-fitting. There's no judgment from me here --- everyone has made this mistake, and most of us (myself included) continue to do so.
+
+There are no time columns in my data; the source of the data leakage is more subtle than that. Pokémon belong to _families_. Charmander, upon reaching certain conditions, permanently changes into Charmeleon through a process known as _evolution_. Charmeleon eventually becomes Charizard. All three of these Pokémon belong to the "Charmander" family. It's reasonable to assume that the relationship between stats is similar for Pokémon in the same family.
+
+Is my model learning that certain stat values are associated with certain types? Or is it learning to identify which Pokémon belong to which family, and then assuming that they all have the same type? That might be a fine model, but it detracts from my hypothesis.
+
+### Finding new data: 
+
+My model doesn't contain information on Pokémon families. This is very common part of data science --- thinking I have all the data but then needing to find more. I used [the table from the Pokémon fandom wiki](https://pokemon.fandom.com/wiki/List_of_Pok%C3%A9mon_by_evolution) to associate a "family" with each Pokémon. The logic for these joins and some other minor corrections is stored [as a gist](https://gist.github.com/mdneuzerling/78a955dfa37087b90b6094911c9d03d5). The result is a CSV named "pokemon_with_families.csv".
+
+```{r data-load-pokemon-with-families}
+pokemon <- readr::read_csv("data/pokemon_with_families.csv") %>% 
+  janitor::clean_names() %>% 
+  mutate(
+    type1 = as.factor(type1),
+    type2 = as.factor(type2),
+    legendary = as.logical(legendary)
+  )
+```
+
+### Grouped train-test split
+
+I'll re-split the data, this time ensuring that if a Pokémon from a given family is in `pokemon_train`, then _all_ Pokémon in that family are in `pokemon_train`, and similarly for `pokemon_test`:
+
+```{r grouped-split}
+set.seed(12345)
+
+train_families <- pokemon %>% distinct(family) %>% 
+  sample_frac(0.7) %>% pull(family)
+
+pokemon_train <- pokemon %>% filter(family %in% train_families)
+pokemon_test <- pokemon %>% filter(!(family %in% train_families))
+```
+
+This is a new training data set, so I have a new no-information rate:
+
+```{r grouped-train-test-nir}
+no_information_rate(pokemon_train)
+```
+
+I'll try re-fitting the model on this newly split data:
+
+```{r second-model-fit, warning = FALSE}
+fitted_pokemon_model <- pokemon_model %>% fit(
+  type1 ~ hp + atk + def + sp_atk + sp_def + spd,
+  data = pokemon_train
+)
+
+second_attempt_accuracy <- pokemon_test %>% 
+  mutate(
+    predicted_type1 = predict(
+      fitted_pokemon_model,
+      pokemon_test
+    )$.pred_class
+  ) %>%
+  accuracy(type1, predicted_type1) %>% 
+  pull(.estimate)
+
+second_attempt_accuracy
+```
+
+`r scales::percent(second_attempt_accuracy, 0.1)` is not so impressive when the no-information rate is `r scales::percent(no_information_rate(pokemon_train), 0.1)`. Data leakage can make a huge difference!
+
+## A little bit of feature engineering
+
+Feature engineering is the process of refining existing features or creating new ones to improve the accuracy of a model. Informally, it lets models use features the way a human being might see them.
+
+I know that some Pokémon types are stronger than others. For example, Dragon Pokémon tend to be stronger than bug Pokémon. I can see that in the comparison of their `atk` and `sp_atk` below:
+
+```{r plot-before-scaling}
+plot_dragon_bug <- function(pokemon_data) {
+  pokemon_data %>% 
+  filter(
+    type1 %in% c(
+      "Bug", "Dragon"
+    )
+  ) %>% 
+  ggplot(aes(
+      x = atk,
+      y = sp_atk,
+      color = type1
+  )) +
+  geom_point(size = 2) + 
+  scale_color_manual(
+    values = c(
+      "Dragon" = "#C77CFF",
+      "Bug" = "#7CAE00"
+    )
+  )
+}
+
+pokemon %>% plot_dragon_bug()
+```
+
+It's possible that rather than considering absolute stats I need to consider _proportional_ stats. That is, the proportion of attack, speed, etc. relative to a Pokémon's total stats. If this helps to separate the types I might be able to see that separation in a plot:
+
+```{r plot-after-scaling}
+pokemon_train %>%
+  mutate(across(hp:spd, function(x) x / total)) %>%
+  plot_dragon_bug()
+```
+
+It's not a very convincing change. If a difference is there, it's a minor one. Still, I think it's enough to proceed with another attempt a model.
+
+I need to introduce a preprocessing _recipe_ using the `recipes` package, part of the `tidymodels` universe. This recipe tells R how to manipulate my data before modelling. Recipes are prepared based on the training data and applied to the test data to prevent data leakage that might occur from steps such as imputation and normalisation.
+
+```{r recipe}
+preprocessing <- recipe(
+  type1 ~ hp + atk + def + sp_atk + sp_def + spd + total,
+  data = pokemon_train
+) %>%
+  step_mutate(
+    hp = hp / total,
+    atk = atk / total,
+    def = def / total,
+    sp_atk = sp_atk / total,
+    sp_def = sp_def / total,
+    spd = spd / total
+  ) %>% 
+  step_normalize(total)
+```
+
+The last step, which scales and centres the data, isn't strictly necessary for tree-based models. It may, however, make it easier to interpret stats.
+
+In `tidymodels`, a `workflow` is a combination of a model and a recipe. It lets me combine my preprocessing and modelling steps into a single object that can be fit in one step.
+
+```{r workflow}
+pokemon_workflow <- workflow() %>%
+  add_recipe(preprocessing) %>% 
+  add_model(pokemon_model)
+```
+
+I can now see if this extra bit of feature engineering will pay off:
+
+```{r workflow-fit}
+fitted_pokemon_workflow <- pokemon_workflow %>% fit(pokemon_train)
+
+third_attempt_accuracy <- pokemon_test %>% 
+  mutate(
+    predicted_type1 = predict(
+      fitted_pokemon_workflow,
+      pokemon_test
+    )$.pred_class
+  ) %>%
+  accuracy(type1, predicted_type1) %>% 
+  pull(.estimate)
+third_attempt_accuracy
+```
+
+That's an accuracy of `r scales::percent(third_attempt_accuracy, 0.1)` compared to a no-information rate is `r scales::percent(no_information_rate(pokemon_train), 0.1)`. That's disappointing! It looks like this scaling didn't do anything.
+
+## MORE DATA
+
+At this point I'm willing to give up on my hypothesis. I don't think that stats alone are enough to predict type. It may be a valid hypothesis for a smaller group of types, like Fire and Fighting, but the relationship doesn't seem to be there for the whole data set.
+
+Giving up on a hypothesis means getting to try new hypotheses. I want to try adding `color`. It shouldn't come as a surprise that Grass Pokémon are often green and Fire Pokémon are often red. I'll redefine my preprocessing recipe and workflow to include `color` (here given its unfortunate US spelling):
+
+```{r workflow-with-colour}
+preprocessing <- recipe(
+  type1 ~ hp + atk + def + sp_atk + sp_def + spd + total + color,
+  data = pokemon_train
+) %>%
+  step_mutate(
+    hp = hp / total,
+    atk = atk / total,
+    def = def / total,
+    sp_atk = sp_atk / total,
+    sp_def = sp_def / total,
+    spd = spd / total
+  ) %>% 
+  step_normalize(total)
+
+pokemon_workflow <- workflow() %>%
+  add_recipe(preprocessing) %>% 
+  add_model(pokemon_model)
+```
+
+Hopefully this information, along with stats, should be enough to learn something about Pokémon types.
+
+```{r workflow-with-colour-fit}
+fitted_pokemon_workflow <- pokemon_workflow %>% fit(pokemon_train)
+
+fourth_attempt_accuracy <- pokemon_test %>% 
+  mutate(
+    predicted_type1 = predict(
+      fitted_pokemon_workflow,
+      pokemon_test
+    )$.pred_class
+  ) %>%
+  accuracy(type1, predicted_type1) %>% 
+  pull(.estimate)
+```
+
+That's an accuracy of `r scales::percent(fourth_attempt_accuracy, 0.1)` compared to a no-information rate is `r scales::percent(no_information_rate(pokemon_train), 0.1)`. Finally, a result that isn't terrible!
+
+## Dig into the results and ask questions
+
+I've made another mistake: I've reduced my model performance to a single metric. It's much more complicated than that. I need to gather some intuition about how my model performs, and a confusion matrix is a good visualisation for that:
+
+```{r confusion-matrix}
+pokemon_test %>% 
+  mutate(
+    predicted = predict(
+      fitted_pokemon_workflow,
+      pokemon_test
+      )$.pred_class
+  ) %>% 
+  conf_mat(type1, predicted) %>% 
+  autoplot(type = "heatmap") + 
+  theme(
+    axis.text.x = element_text(
+      angle = 90,
+      vjust = 0.5,
+      hjust = 1
+    )
+  )
+```
+
+What I want to see is a lot of dark squares along the diagonal. The diagonal squares are the _correct_ predictions, with everything else a misprediction.
+
+The model seems to have learnt something about bug and psychic proble, so it's not completely terrible. It's making a lot of mistakes around Water and Normal Pokémon. These are the most common types, so it makes sense that the model would bias them and then get it wrong.
+
+I can also see that some types are rare. For example, there are no Flying Pokémon in the test data! This is because many Flying Pokémon actually have Flying as their _secondary_ type, and so there are very few example of _primary_ Flying Pokémon.
+
+## Modelling strategy
+
+What I've created here isn't a useful model, because we already know the types of all the Pokémon. What I've outlined is a _process_ for training a model. That process is:
+
+1. work out what you're trying to answer
+1. look at your data
+1. define a metric
+1. decide what makes a model good enough
+1. split your data --- watch out for data leakage!
+1. get more data if you need it
+1. train and evaluate --- including visualisations!
+
+And above all, recognise that data science is an iterative process in which success can only come after a long, disappointing chain of failures.
+
+## Bonus: `vetiver`, a new approach for deploying R models
+
+[Julia Silge](https://juliasilge.com/) of the [tidymodels](https://www.tidymodels.org/) team recently announced a new package for model deployment in R: [`vetiver`](https://vetiver.tidymodels.org). I have a model here and it's already a `tidymodels` workflow, so I thought this would be a good chance to quickly explore `vetiver`.
+
+I'm going to need three more packages here: `vetiver` itself, the `pins` package for storing model artefacts, and `plumber` for hosting models as an API.
+
+```{r vetiver-load, warning=FALSE, message=FALSE}
+library(vetiver)
+library(pins)
+library(plumber)
+```
+
+I've already got a workflow, so it's straightforward to turn it into a `vetiver` model:
+
+```{r vetiver-definition}
+v <- vetiver_model(fitted_pokemon_workflow, "pokemon_rf")
+v
+```
+
+I'm going to host the model in a separate R process so that it can serve predictions to data in my current R process. For that I'll need somewhere to save the model so that I can access it between separate R processes. The local board from the `pins` package is suitable. This is a storage location that's local to my computer. If I wanted to save the model artefact to a particular location I would use `board_folder` instead, but in this case I don't care where the model is saved.
+
+```{r delete_model_if_exists, include = FALSE}
+# If the pin exists, delete it so it looks like I'm pinning the model for the
+# first time
+if ("pokemon_rf" %in% pin_list(board_local())) {
+  pin_delete(board_local(), "pokemon_rf")
+}
+```
+
+```{r save_model}
+board_local() %>% vetiver_pin_write(v)
+```
+
+I create the `start_plumber` function that loads the necessary packages and the model artefact, and starts serving it as an API using the `plumber` package. A heads up here that I'm being quite eager to load massive metapackages like `tidyverse` and `tidymodels`. This is generally a bad idea in production situations. If I were doing this "for real" I would want my start-up to be as lean as possible, so I would only load the bare minimum packages I need.
+
+```{r start-plumber}
+start_plumber <- function() {
+  library(tidyverse)
+  library(tidymodels)
+  library(vetiver)
+  library(pins)
+  library(plumber)
+    
+  v <- vetiver_pin_read(board_local(), "pokemon_rf")
+    
+  pr() %>% vetiver_pr_predict(v) %>% pr_run(port = 8088)
+}
+```
+
+Look at how straightforward it is to host a model with `vetiver` and `plumber`! I can actually take my model and start hosting a prediction endpoint in a single line of code. That's wonderful.
+
+Now I need to serve the API. I'm going to use the `callr` package to create an R process in the background that will call this function and start waiting for invocations. This R process will exist until it either errors or I kill it.
+
+<!-- For some reason, this doesn't work in R Markdown, but it works in RStudio. I don't want to troubleshoot this, so I'm going to fudge the cell outputs. -->
+
+```{r callr-start-plumber, eval=FALSE}
+plumber_process <- callr::r_bg(start_plumber)
+```
+
+From within R I can use `vetiver_endpoint` to create an object that can be used with the `predict` generic, as if the endpoint were a model itself.
+
+```{r plumber_call_response, include=FALSE}
+tibble::tribble(
+  ~.pred_class,
+  "Bug",
+  "Bug",
+  "Psychic",
+  "Bug",
+  "Bug"
+)
+```
+```{r plumber_call, eval=FALSE}
+endpoint <- vetiver_endpoint("http://127.0.0.1:8088/predict")
+pokemon_test %>% 
+  head(5) %>% 
+  predict(endpoint, .)
+#> # A tibble: 5 × 1
+#>   .pred_class
+#>   <chr>      
+#> 1 Bug        
+#> 2 Bug        
+#> 3 Psychic    
+#> 4 Bug        
+#> 5 Bug  
+```
+
+Of course, I can also query this endpoint outside of R. Here I'm going to use the `jsonlite` package to convert the first 5 rows of `pokemon_test` into a JSON, and the `httr` package to `POST` that JSON to the prediction endpoint. I'll then convert the JSON back into a tibble (data frame).
+
+```{r curl_call, eval=FALSE}
+response <- httr::POST(
+    "http://127.0.0.1:8088/predict",
+    body = pokemon_test %>% head(5) %>% jsonlite::toJSON()
+)
+httr::content(response, as = "text", encoding = "UTF-8") %>%
+    jsonlite::fromJSON() %>% 
+    as_tibble()
+#> # A tibble: 5 × 1
+#>   .pred_class
+#>   <chr>      
+#> 1 Bug        
+#> 2 Bug        
+#> 3 Psychic    
+#> 4 Bug        
+#> 5 Bug  
+```
+
+I could have submitted that `POST` request from anywhere on my local machine. I could query my API from a Python kernel running in Jupyter, or from the terminal.
+
+As a clean-up step, I need to kill that Plumber process:
+
+```{r kill-plumber, eval=FALSE}
+plumber_process$kill()
+```
+
+I've only scratched the surface here but so far it looks like `vetiver` is a wonderful package. It accomplishes so much with an extraordinarily simple API. Thank you to Julia and the `tidymodels` team for their contribution to the R MLOps ecosystem!
+
+***
+
+[The image at the top of this page is by George Becker](https://www.pexels.com/photo/1-1-3-text-on-black-chalkboard-374918/) and is used under the terms of [the Pexels License](https://www.pexels.com/license/).
+
+```{r sessioninfo, eval=TRUE}
+devtools::session_info()
+```

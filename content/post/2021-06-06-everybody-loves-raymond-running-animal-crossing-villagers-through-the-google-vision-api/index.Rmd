@@ -1,0 +1,452 @@
+---
+title: "Everybody Loves Raymond: Running Animal Crossing Villagers through the Google Vision API"
+author: ~
+date: '2021-06-06'
+slug: everybody-loves-raymond-running-animal-crossing-villagers-through-the-google-vision-api
+category: code
+tags:
+    - R
+    - cloud
+featured: "/img/featured/animal-crossing.webp"
+output: hugodown::md_document
+---
+    
+```{r setup, include=FALSE, eval=FALSE}
+knitr::opts_chunk$set(eval = TRUE, cache = TRUE)
+```
+
+_Animal Crossing: New Horizons_ kept me sane throughout the first Melbourne COVID lockdown. Now, in lockdown 4, it seems right that I should look back at this cheerful, relaxing game and do some data stuff. I'm going to take the _Animal Crossing_ villagers in the [Tidy Tuesday Animal Crossing dataset](https://github.com/rfordatascience/tidytuesday/blob/master/data/2020/2020-05-05/readme.md) and combine it with survey data from the [Animal Crossing Portal](https://www.animalcrossingportal.com/games/new-horizons/guides/villager-popularity-list.php#/), giving each villager a measure of popularity. I'll use the [Google Cloud Vision API](https://cloud.google.com/vision) to annotate each of the villager thumbnails, and with these train a a (pretty poor) model of villager popularity.
+
+```{r packages, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tidymodels)
+library(glue)
+library(httr)
+library(ggimage)
+library(patchwork)
+library(lime)
+```
+
+## Retrieve the villager popularity votes
+
+The [Animal Crossing Portal](https://www.animalcrossingportal.com/) is a fan site that runs a monthly poll on favourite villagers. They keep historical data in publicly available Google Sheets, which makes a data scientist like me very happy.
+
+The sheet is a list of votes, but two columns to the side tally the total votes for each villager. That leaves a lot of dangling empty rows. I'll grab those two columns and delete the empty rows.
+
+```{r popularity, cache = TRUE}
+popularity_url <- "https://docs.google.com/spreadsheets/d/1ADak5KpVYjeSRNN4qudYERMotPkeRP5n4rN_VpOQm4Y/edit#gid=0"
+googlesheets4::gs4_deauth() # disable authentication for this public sheet
+
+popularity <- googlesheets4::read_sheet(popularity_url) %>%
+    transmute( # transmute combines mutate and select
+        name = Villagers,
+        popularity = Tally
+    ) %>%
+    na.omit()
+
+popularity %>% arrange(-popularity) %>% head()
+```
+
+
+## Retrieve the Tidy Tuesday villager data
+
+I always come late to the Tidy Tuesday party. This is the dataset from 2020-05-05. It contains a data frame of every villager available in _Animal Crossing: New Horizons_ (at the time), with their gender, species, and a few other attributes. It also contains a `url` column pointing to a thumbnail of the villager --- I'll use this later when I'm querying the Vision API.
+
+```{r tidy_tuesday_villagers, message=FALSE, warning=FALSE, cache = TRUE}
+tidy_tuesday_data <- tidytuesdayR::tt_load("2020-05-05")
+tidy_tuesday_villagers <- tidy_tuesday_data$villagers
+tidy_tuesday_villagers %>% head()
+```
+
+Running assertions against datasets is a good idea. I'll check that I have a popularity score for every villager. There are villagers in the `popularity` data that aren't in the Tidy Tuesday data, but this is to be expected as new characters have been released in the time since the Tidy Tuesday data set was published. I'll also check that there are no missing values in columns that I care about --- there are missing values for the villagers' favourite songs, but I don't need that information.
+
+```{r tidy_tuesday_villagers_assertions}
+tidy_tuesday_villagers %>%
+  anti_join(popularity, by = "name") %>%   
+  {assertthat::assert_that(nrow(.) == 0)}
+tidy_tuesday_villagers %>% 
+  select(-song) %>% 
+  complete.cases() %>% 
+  all() %>% 
+  assertthat::assert_that()
+```
+
+With those checks done, I can safely join:
+
+```{r villagers}
+villagers <- tidy_tuesday_villagers %>% left_join(popularity, by = "name")
+```
+
+## This data is fun to plot
+
+Those thumbnails add a bit of flair to any plot. It should come as no surprise to any _Animal Crossing_ fan that Marshal is the favourite:
+
+```{r top-villagers, fig.width = 12, fig.height = 12}
+villagers %>% 
+  arrange(-popularity) %>% 
+  head(10) %>% 
+  mutate(name = factor(name, levels = name)) %>% 
+  ggplot(aes(x = name, y = popularity, fill = name)) +
+  geom_bar(stat = "identity") + 
+  geom_image(
+    aes(x = name, y = popularity - 70, image = url),
+    size = 0.07
+  ) +
+  ggtitle("Marshal is the most popular villager") +
+  theme(
+    text = element_text(size = 16),
+    legend.position = "none",
+    axis.title.x = element_blank(),
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    aspect.ratio = 1
+  ) 
+```
+
+_Animal Crossing_ villagers are sorted into `r villagers %>% distinct(species) %>% nrow()` different species. Some are more loved than others. The popularity densities have long tails, so taking the `log` here makes them plot a lot better:
+
+```{r species-popularity}
+villagers %>% 
+    filter(species %in% c("cat", "chicken", "squirrel")) %>% 
+    ggplot(aes(x = log(popularity), group = species, fill = species)) + 
+    geom_density(alpha = 0.4) +
+    theme(text = element_text(size = 16)) +
+    ggtitle("Cats are more popular than chickens")
+```
+
+Octopuses are particularly loved, though. There are only `r nrow(filter(villagers, species == "octopus"))` octopus villagers, but their mean popularity is `r villagers %>% filter(species == "octopus") %>% pull(popularity) %>% mean() %>% round()`, as opposed to the overall mean popularity of `r villagers %>% pull(popularity) %>% mean() %>% round()`. People really like [Zucker](https://animalcrossing.fandom.com/wiki/Zucker)!
+
+## Authenticating with Google Cloud
+
+By this point I've already set up an account and project with the Google Cloud Platform (GCP), and enabled the relevant APIs. I won't go into that detail here, since the GCP documentation is pretty good. However, I still need to authenticate myself to the GCP before I can use any of its services.
+
+There's no all-encompassing R SDK for the Google Cloud Platform. [A few services can be used with packages provided by the CloudyR project](https://cloudyr.github.io/packages/index.html), but there's nothing for the Vision API. I'm happy to use Google's HTTP APIs directly, but the authentication usually trips me up. Fortunately, the `gargle` package is _excellent_, and makes the authentication much simpler than it would be to do it manually.
+
+[Following the instructions provided by Google](https://cloud.google.com/docs/authentication/production), I created a service account with read/write access to Cloud Storage and permissions to use the Vision API. The actual credentials are kept in a JSON. Within my `.Renviron` file (hint: `usethis::edit_r_environ()` will open this in RStudio) I set the "GOOGLE_APPLICATION_CREDENTIALS" environment variable to the path of this JSON. Now, I can use the `gargle` package to create a token with the appropriate scopes:
+
+```{r gcp-token}
+gcp_token <- gargle::credentials_service_account(
+  scopes = c(
+    "https://www.googleapis.com/auth/cloud-vision",
+    "https://www.googleapis.com/auth/devstorage.read_write"
+  ),
+  path = Sys.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+)
+```
+
+This token can be passed into `httr` verbs (in fact, it's a `httr::TokenServiceAccount`) where it will be used for authentication. `httr` handles all of the stuff I don't want to think about, like token refreshing and authentication headers.
+
+## Uploading the images
+
+I can query the Vision API with image data directly, but another option is to keep the thumbnails in a [Cloud Storage](https://cloud.google.com/storage) bucket. I created an `animal-crossing` bucket through the Google Cloud Platform console. I'll create a function for uploading villager images. I assume `villager` to be a single row of the `villagers` data frame, so that I can effectively treat it like a list. This function will:
+
+1. download `villager$url` to a temp file and use `on.exit` to clean up afterwards,
+1. define the name of the object I'm creating, using the villager's id,
+1. use `httr::POST` to post the image using my `gcp_token`, and finally
+1. check that the resulting status code is 200 (success)
+
+```{r upload-image-function}
+upload_villager_image <- function(villager) {
+  temp <- tempfile()
+  on.exit(unlink(temp))
+  download.file(villager$url, temp)
+  object_name <- paste0(villager$id, ".png")
+
+  response <- POST(
+    glue("https://storage.googleapis.com/upload/storage/v1/b/animal-crossing/o?uploadType=media&name={object_name}"),
+    body = upload_file(temp, type = "image/png"),
+    config(token = gcp_token)
+  )
+  if (status_code(response) != 200) {
+    stop(glue("Upload of {villager$id} failed with status code {status_code(response)}"))
+  }
+}
+```
+
+If I can upload a single villager image, I can upload them all. I use `purrr` to iterate through the rows of the `villagers` data frame, uploading each of the `r nrow(villagers)` villager images.
+
+```{r upload-images, eval = FALSE}
+walk(
+  1:nrow(villagers),
+  function(row_index) {
+    villager <- villagers[row_index,]
+    upload_villager_image(villager)
+  }
+)
+```
+
+A quick aside: I don't often see code that uses `purrr` to iterate through the _rows_ of a data frame like this, which makes me think I'm doing something unconventional. A better option may be to pull out `villager$name` and `villager$url`, and pass those as arguments to a binary `upload_villager_image` function.
+
+## Annotating the villagers
+
+With the images uploaded to Cloud Storage, I can query the Cloud Vision API with the path to a given thumbnail. For example, I can give `gs://animal-crossing/tangy.png` as an argument to the `images:annotate` endpoint.
+
+The response is a list of labels, each consisting of a `description` (the label itself), a confidence `score` and a `topicality` score. I'll flatten this to a one-row data frame (`tibble`) of confidence scores, with columns the labels. This will make it easier to later concatenate the labels with the `villagers` data frame.
+
+Note also the potential for the API to return duplicate labels --- in this case, I take the maximum `score`.
+
+```{r annotate}
+annotate <- function(villager_id) {
+  json <- jsonlite::toJSON(
+      list(
+          requests = list(
+              image = list(
+                  source = list(
+                      gcsImageUri = glue::glue("gs://animal-crossing/{villager_id}.png")
+                  )
+              ),
+              features = list(list(
+                  maxResults = 50,
+                  type = "LABEL_DETECTION"
+              ))
+          )
+      ),
+      auto_unbox = TRUE
+  )
+  
+  response <- POST(
+      "https://vision.googleapis.com/v1/images:annotate",
+      body = json,
+      config(token = gcp_token),
+      add_headers(`Content-Type` = "application/json; charset=utf-8")
+  )
+  
+  if (status_code(response) != 200) {
+      stop("Error labelling ", villager)
+  }
+  
+  content(response)$responses[[1]]$labelAnnotations %>% 
+    map(as_tibble) %>% 
+    reduce(bind_rows) %>% 
+    select(description, score) %>% 
+    pivot_wider(names_from = description, values_from = score, values_fn = max) %>% 
+    janitor::clean_names()
+}
+```
+
+I ask for 50 labels, but the API _appears_ not return labels with a confidence score of less than 0.5, so I may get fewer:
+
+```{r annotate-audie, cache = TRUE}
+annotate("audie")
+```
+
+This isn't very pretty to look at, so I'll make a nice plot:
+
+```{r plot-villager-function}
+plot_villager <- function(villager_id) {
+  villager <- villagers %>% filter(id == villager_id)
+  if (nrow(villager) == 0) {
+    stop("Couldn't find villager with id ", villager_id)
+  }
+  
+  villager_plot <- villager_id %>% 
+    annotate() %>% 
+    pivot_longer(everything(), names_to = "label", values_to = "score") %>% 
+    top_n(8, wt = score) %>% 
+    mutate(label = factor(label, levels = rev(.$label))) %>% 
+    ggplot(aes(x = label, y = score, fill = label)) +
+    geom_bar(stat = "identity") +
+    scale_fill_brewer(palette="Set1") +
+    theme(
+      legend.position = "none",
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank(),
+      axis.text = element_text(size = 20),
+      plot.title = element_text(size = 32)
+    ) +
+    ggtitle(villager$name) +
+    coord_flip()
+
+  villager_image <- png::readPNG(
+    curl::curl_fetch_memory(villager$url)$content,
+    native = TRUE
+  )
+  
+  villager_plot + villager_image
+}
+```
+
+```{r plot-audie, fig.width = 12, fig.height = 6, cache = TRUE}
+plot_villager("audie")
+```
+
+# An attempt at machine learning
+
+Readers of my blog should expect this by now, but I tend not to care about model accuracy in these posts. My interest is always in the process of building a model, rather than the model itself. A warning ahead: the model I'm about to train here will perform terribly.
+
+I don't believe model tuning or trying different techniques would help here. The dataset is very sparse and wide, so there's not a lot of information to model.
+
+## Label all villagers
+
+I've defined a function for annotating a single villager, but I have `r nrow(villagers)` to label. [Google Cloud does have a batch annotation API](https://cloud.google.com/vision/docs/batch), but I decided to save the coding effort and just re-use my single-villager annotation function with `purrr`. 
+
+The following can take a few minutes. At times progress was stalling, and I suspect I was brushing up against some API limits. The `Sys.sleep(0.5)` is intended to address that, but I'm only speculating.
+
+```{r annotate-all, cache = TRUE}
+labels <- map(villagers$id, function(x) {Sys.sleep(0.5); list(annotate(x))}) %>% 
+  reduce(bind_rows) %>% 
+  rename_all(~glue("label_{.x}"))
+```
+
+I've prefixed every label with "label_" so that I can identify these columns later in data pre-processing. Setting up a sensible column naming convention will let me use the powerful `tidyselect::starts_with` selector.
+
+`labels` is a wide data frame with `r ncol(labels)` columns. But `r scales::percent(sum(is.na(labels)) / (nrow(labels) * ncol(labels)))` entries are `NA`. This is because the Cloud Vision API returns only the labels it deems most relevant. It also seems to not return any labels with a "score" of less than 0.5. The end result of `dplyr::bind_rows` is a wide, sparse data frame of floats and `NA`s.
+
+I'll have to deal with this problem in pre-processing. For now I'll combine `labels` with the `villagers` data frame:
+
+```{r villagers-labelled}
+villagers_labelled <- cbind(villagers, labels)
+dim(villagers_labelled)
+```
+
+## Pre-processing
+
+I'll use the `recipes` package to pre-process the data before modelling. This is one of my favourite packages, and a real star of `tidymodels`. First I'll do a simple `train`/`test` split, since my pre-processing strategy can't depend on the `test` data:
+
+```{r data-split}
+split <- initial_split(villagers_labelled, prop = 0.8)
+train <- training(split)
+dim(train)
+test <- testing(split)
+dim(test)
+```
+
+To mitigate the impact of the sparsity, I'll remove any labels that are blank more than half the time in the training data. I'll make a note of these now:
+
+```{r too-many-missing}
+too_many_missing <- train %>%
+  select(starts_with("label")) %>% 
+  select_if(~sum(is.na(.x))/length(.x) > 0.5) %>% 
+  colnames()
+```
+
+I can't find documentation to confirm this, but it appears as though the Google Cloud Vision API won't return a label with a score of less than 0.5. One way to deal with the sparsity of these labels is to binarise them --- `TRUE` if the label is _present_, otherwise `FALSE`. This turns the labels into features that effectively say, "Did the Cloud Vision API detect this label?".
+
+Species is also a difficult predictor here --- in the training set there are `r length(unique(train$species))` different species amongst `r nrow(train)` villagers. I'll collapse the uncommon species into an "other" category.
+
+The remaining pre-processing steps are fairly standard --- discarding unneeded columns, converting strings to factors, and applying one-hot encoding. I'll also keep using `log(popularity)` here, to deal with those long tails in the popularity scores.
+
+```{r pre-processing}
+pre_processing <- recipe(train, popularity ~ .) %>%
+  step_rm(row_n, id, name, birthday, song, phrase, full_id, url) %>% 
+  step_rm(one_of(too_many_missing)) %>% 
+  step_mutate_at(starts_with("label"), fn = ~as.integer(!is.na(.x))) %>% 
+  step_string2factor(has_type("character")) %>% 
+  step_other(species, threshold = 0.03) %>% 
+  step_dummy(all_nominal_predictors(), one_hot = TRUE) %>% 
+  step_log(popularity, skip = TRUE)
+```
+
+```{r processed-train, include = FALSE}
+# used for some inline values
+train_processed <- juice(prep(pre_processing, train))
+```
+
+## An `xgboost` model
+
+The processed `train` data has `r ncol(train_processed)` columns, but is of (matrix) rank `r Matrix::rankMatrix(train_processed)`. Informally, this means that the training data is bigger than the information it contains. Linear models will throw warnings here. Tree-based methods will hide the problem, but there's no escaping the fact that any model trained on this data will be terrible.
+
+I'll set up an `xgboost` model with the `parsnip` package, allowing for tuning the `tree_depth` and `mtry` parameters. Here, `mtry` refers to the number of predictors available to the model at each split. Finally, I'll combine the pre-processing and the model into a `workflow`.
+
+```{r xgboost-model}
+xgboost_model <- boost_tree(trees = 200, mtry = tune(), tree_depth = tune()) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("regression")
+
+xgboost_workflow <- workflow() %>% 
+  add_recipe(pre_processing) %>% 
+  add_model(xgboost_model)
+xgboost_workflow
+```
+
+I'll tune the model, relying on the default grid for `tree_depth` and `mtry`, and using 5-fold cross-validation:
+
+```{r tune-model, cache = TRUE}
+folds <- vfold_cv(train, v = 5)
+tune_results <- tune_grid(xgboost_workflow, resamples = folds)
+```
+
+I'll use whichever `mtry` and `tree_depth` parameters minimise root mean-squared error to finalise my `workflow`, and fit it to the `train` data.
+
+```{r tuned-model}
+fitted_xgboost_workflow <- xgboost_workflow %>% 
+  finalize_workflow(select_best(tune_results, metric = "rmse")) %>% 
+  fit(train)
+```
+
+It's time to see just how bad this model is. Recall that I took the `log` of the popularity in the training data, so to truly evaluate the performance I have to take the `exp` of the predictions. 
+
+```{r evaluate-model}
+test_performance <- test %>% 
+  mutate(
+    predicted =  predict(fitted_xgboost_workflow, test)$.pred %>% exp(),
+    residual = popularity - predicted
+  )
+metric_set(rmse, mae)(test_performance, popularity, predicted)
+```
+
+Oof, that model is pretty bad. I wonder if it's because the distribution of popularity isn't uniform? I'll compare the predicted and actual values to see if there's a difference at the extreme ends:
+
+```{r predicted-vs-actual}
+test_performance %>% 
+  ggplot(aes(x = predicted, y = popularity)) + 
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1)
+```
+
+Sure enough, that seems to be the case. For values below about 50, the model seems to be _not too bad_, and certainly better than it performs for the more popular villagers.
+
+## Model interpretability
+
+I tried to use some model interpretability techniques to see what effect these labels were having on villager popularity. Unfortunately, I had trouble applying either LIME or SHAP:
+
+* The `lime` package throws many, many warnings. I'm not surprised. The inputs are rank-deficient matrices and the LIME technique uses on linear models.
+* The `shapr` package doesn't support explanations for more than 30 features.
+
+I'll show the results of my `lime` analysis here, with the understanding that the results are almost certainly nonsense.
+
+First I'll separate the pre-processing function and model object from the workflow, since `lime` (nor `shapr`) can't handle the in-built pre-processing of a `workflow` object:
+
+```{r separate-workflow}
+pre_processing_function <- function(x) {
+  pull_workflow_prepped_recipe(fitted_xgboost_workflow) %>% 
+    bake(x) %>% 
+    select(-popularity)
+}
+
+fitted_xgboost_model <- pull_workflow_fit(fitted_xgboost_workflow)
+```
+
+Then I fit the explainer. The quantile binning approach just doesn't work with such sparse data, so I disable it.
+
+```{r explainer}
+explainer <- lime(
+  pre_processing_function(train),
+  fitted_xgboost_model,
+  quantile_bins = FALSE
+)
+```
+
+Now I'll explain a few test cases and plot the results. I'll suppress the warnings that would usually appear here. 
+
+```{r explanation, warning = FALSE, message = FALSE}
+test_case <- sample_n(test, 10)
+
+explanations <- suppressWarnings(
+  explain(
+    pre_processing_function(test_case),
+    explainer,
+    n_features = 6
+  )
+)
+
+plot_explanations(explanations) + 
+  scale_x_discrete(labels = test_case$name)
+```
+
+***
+
+The _Animal Crossing_ franchise and its fictional characters are the property of Nintendo. The thumbnail images of Animal Crossing villagers on this page are used for the purposes of study and commentary.
+
+```{r sessioninfo, eval=TRUE}
+devtools::session_info()
+```

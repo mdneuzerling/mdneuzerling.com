@@ -1,0 +1,26 @@
+# Site Configuration
+site_title = "David Neuzerling"
+site_description = "Data specialist and former mathematician, with a background in modelling, forecasting and visualisation."
+base_url = "https://mdneuzerling.com"
+
+# Author Information
+author_name = "David Neuzerling"
+author_description = "Data specialist and former mathematician. Experienced with R and Python. In my spare time, I'm playing with fountain pens or obsessing over corgis."
+profile_image = "/img/profile/profile_1_small.webp"
+
+# Social Links
+github_url = "https://github.com/mdneuzerling"
+linkedin_url = "https://linkedin.com/in/mdneuzerling"
+bluesky_url = "https://bsky.app/profile/md.neuzerl.ing"
+
+# Pagination
+posts_per_page = 10
+
+# Post Cards
+excerpt_length = 300
+
+# Footer
+footer_lines = [
+    "The content of this blog is licensed under a Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License (http://creativecommons.org/licenses/by-nc-nd/4.0/) except where stated otherwise. The build script and CSS of this website were generated with the assistance of a large language model. LLMs have not been used to generate any content."
+]
+

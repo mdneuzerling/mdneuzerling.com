@@ -1,0 +1,172 @@
+---
+title: Some Dockerfiles for Building R Package Binaries
+author: ~
+date: '2021-04-19'
+slug: some-dockerfiles-for-building-r-package-binaries
+category: code
+tags:
+    - R
+featured: "/img/featured/lego-build.webp"
+output: hugodown::md_document
+---
+    
+```{r setup, include=FALSE, eval=FALSE}
+knitr::opts_chunk$set(eval = FALSE)
+```
+
+I went down a strange path recently, trying to compile binaries of R packages for Linux. I'm not sure why --- this area is pretty much covered by the [RStudio Package Manager](https://packagemanager.rstudio.com/client/#/). I'll leave my Dockerfiles here in case they're of any use to a future wayward R programmer.
+
+The intention here is to build a Docker image that can build an R binary with the below command. I'm trying to build x86 binaries on my ARM Macbook, so I'm specifying the platform during both `build` and `run`.
+
+```{bash docker-run, eval=FALSE}
+docker run --platform linux/amd64 -v ~/packages:/packages $IMAGE $PACKAGE $VERSION
+```
+
+This will output the compiled binary into a subdirectory `~/packages` corresponding to the target version of R. These binaries are not portable --- they depend very much on the Linux distribution used to build them.
+
+## Method 1: `conda-build`
+
+`conda` is a package manager mostly associated with Python, but it can also be used for R and other languages.
+
+The Dockerfile below installs Miniconda and `conda-build`, which it uses to build the R package binaries. These are binaries that must be installed with `conda`, rather than through R directly.
+
+I use `mamba` and `boa`, which provide faster alternatives to `conda install` and `conda build`, respectively.
+
+Every time `conda`/`mamba` builds an R package, it fetches all dependencies from scratch. To speed this up, I install R in the `docker build` process so that it's cached. Finally I hardcode the script that's used to build the R package, depending on whether a version is specified.
+
+```{bash conda-build, eval=FALSE}
+ARG OS_IDENTIFIER=ubuntu
+ARG OS_TAG=20.04
+ARG PLATFORM=linux/amd64
+
+FROM --platform=${PLATFORM} ${OS_IDENTIFIER}:${OS_TAG} 
+
+ENV LANG en_US.UTF-8
+
+RUN apt-get update && apt-get install -y curl
+
+# Install Miniconda and conda-build, which is needed to compile R packages
+# for conda-forge 
+ARG MINICONDA_VERSION=py38_4.9.2
+ARG MINICONDA_INSTALLER=Miniconda3-${MINICONDA_VERSION}-Linux-x86_64.sh
+RUN curl -LO https://repo.anaconda.com/miniconda/${MINICONDA_INSTALLER} \
+    && bash ${MINICONDA_INSTALLER} -p /miniconda -b \
+    && rm ${MINICONDA_INSTALLER}
+ENV PATH=/miniconda/bin:${PATH}
+RUN conda install conda-build
+
+# Mamba is much faster for installing packages, and boa lets us use it
+# when building packages
+RUN conda install -c conda-forge mamba boa
+
+# conda-build (and its mamba equivalent) will always reach out to a repository
+# to install dependencies, rather than using pre-installed packages. However,
+# by installing r-base now we can cache the required packages, so that R
+# doesn't have to be downloaded each time a package is built.
+ENV R_VERSION=4.0.3
+RUN mamba install -c conda-forge r-base=${R_VERSION}
+
+# Compiled packages are outputted to this directory. When this container is run,
+# /packages can be used as a target for -v 
+RUN mkdir -p /packages/R-{$R_VERSION}
+
+RUN echo "#!/bin/bash" > build_r_package.sh \
+  && echo ' \n\
+package=$1 \n\
+version=$2 \n\
+if [[ -n "$2" ]]; then \n\
+    echo "Building r-$package-$version" \n\
+    conda skeleton cran --version $version $package \n\
+    conda mambabuild --R ${R_VERSION} -c conda-forge --output-folder /packages/R-${R_VERSION} r-$package-$version \n\
+else \n\
+    echo "Building r-$package" \n\
+    conda skeleton cran $package \n\
+    conda mambabuild --R ${R_VERSION} -c conda-forge --output-folder /packages/R-${R_VERSION} r-$package \n\
+fi ' >> build_r_package.sh \
+  && chmod +x build_r_package.sh
+
+ENTRYPOINT ["/build_r_package.sh"]
+```
+
+Even with `mamba` this is a slow process --- it takes over 10 minutes to compile the `glue` package, which has minimal dependencies.
+
+## Method 2: Just R
+
+Using just R requires a bit more logic. I've separated out some R helper scripts, as well as the bash script that does the actual building. I start with `rocker` which already has R installed. I also need the `remotes` package to install package dependencies.
+
+```{bash normal-build, eval=FALSE}
+FROM rocker/r-ver:4.0.3
+
+RUN apt-get update && apt-get install -y curl
+
+RUN Rscript -e 'install.packages("remotes")'
+
+ENV R_VERSION=4.0.3
+RUN mkdir -p /packages/R-${R_VERSION}
+RUN mkdir /scripts
+
+ADD helpers.R /scripts/helpers.R
+ADD build-R-package.sh /scripts/build-R-package.sh
+RUN chmod +x /scripts/build-R-package.sh
+
+ENTRYPOINT ["/scripts/build-R-package.sh"]
+```
+
+The R helper functions I need query CRAN to determine the latest available version of a package. If the desired version is not the latest, then the source needs to be downloaded from the CRAN archives.
+
+```{r helpers, eval=FALSE}
+cran_version <- function(package) {
+  if (is.null(getOption("repos")) || getOption("repos") == "@CRAN@") {
+    options(repos = c(CRAN = "https://cloud.r-project.org/"))
+  }
+  available <- as.data.frame(available.packages())
+  filtered <- available[available$Package == package,]
+  if (nrow(filtered) != 1) {
+    stop(package, " is not available on CRAN")
+  }
+  filtered$Version
+}
+
+cran_source_url <- function(package, version = NULL) {
+  if (is.null(version)) {
+    version <- cran_version(package)
+    latest_version <- TRUE
+  } else {
+    latest_version <- (version == cran_version(package))
+  }
+  bundle <- paste0(package, "_", version, ".tar.gz")
+  if (latest_version) {
+    paste0("https://cran.r-project.org/src/contrib/", bundle)
+  } else {
+    paste0("https://cran.r-project.org/src/contrib/Archive/", package, "/", bundle)
+  }
+}
+```
+
+The bash script calls on the helpers as needed. If no version is specified, the latest version is used. Then the source is downloaded from CRAN and the package is built. It's also installed --- building and installing are closely related with R. Finally the resulting binary is moved to the `packages` directory.
+
+```{bash build-R-package, eval=FALSE}
+#!/bin/bash
+
+package=$1
+version=$2
+if [[ -z "$version" ]]; then
+    version=$(Rscript -e "source('/scripts/helpers.R');cat(cran_version('$package'))")
+fi
+url=$(Rscript -e "source('/scripts/helpers.R');cat(cran_source_url('$package', '$version'))")
+echo "Downloading $url"
+curl -LO $url
+
+Rscript -e "remotes::install_deps('/${package}_${version}.tar.gz')"
+
+mkdir binary && cd binary
+R CMD INSTALL --build /${package}_${version}.tar.gz
+mv * /packages/R-${R_VERSION}
+```
+
+***
+[The image at the top of this page is in the public domain](https://unsplash.com/photos/C0koz3G1I4I)
+
+```{r sessioninfo, eval=TRUE}
+devtools::session_info()
+```

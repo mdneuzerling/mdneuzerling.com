@@ -1,0 +1,532 @@
+---
+title: "I Tried to Improve how Metaflow Converts R to Python (and I Failed)"
+author: ~
+date: '2021-09-19'
+slug: i-tried-to-improve-how-metaflow-converts-r-to-python-and-i-failed
+category: code
+tags:
+    - R
+    - python
+    - metaflow
+featured: "/img/featured/brick-wall.webp"
+output: hugodown::md_document
+---
+
+```{r setup, include=FALSE, eval=TRUE}
+knitr::opts_chunk$set(eval = FALSE, cache = FALSE)
+library(dplyr)
+library(metaflow)
+```
+
+[Metaflow is one of my favourite R packages](/post/using-metaflow-to-make-model-tuning-less-painful/). Actually, it's a Python module, but the R package provides a set of bindings for running R code through Metaflow. Recently I've spent a good amount of effort trying to improve the way that R data is translated to the Python side of Metaflow, but I just can't get it to work.
+
+So I thought I'd post about what I've learnt. Maybe someone will have an answer. Or maybe just writing out the problem will be enough to give me more ideas. Or maybe it will just be therapeutic!
+
+## How R and Python talk to each other
+
+I work on a team that's a mixture of Python and R specialists.
+
+Okay, mostly Python.
+
+Actually, I'm the only R user.
+
+I'm confident enough with my Python skills, but R feels like _home_. So reticulate is pretty important for me as it lets me access all of the benefits of Python while staying within R.
+
+Reticulate embeds a Python session within an R session, and through a special module makes R objects available in Python. [It also converts between R types and Python types](https://rstudio.github.io/reticulate/articles/calling_python.html#type-conversions-1). This is where it gets a bit tricky.
+
+For the most part, R objects and Python objects are interchangeable. Integers are integers, and strings are strings. Base Python doesn't have a concept of a data frame or an array, so reticulate converts to the pandas and numpy constructs, respectively.
+
+But it doesn't work all of the time. Reticulate is really good, but R and Python aren't always going to be compatible. A good example is the way that missing values are converted. In Python, numpy's `NaN` is often used for missing values. Whereas R supports a few types of missing values, numpy's `NaN` is only ever a float. So the conversions can go a bit astray:
+
+```{r missing-value-conversion, eval = TRUE}
+reticulate::r_to_py(NA_real_)
+reticulate::r_to_py(NA_complex_)
+reticulate::r_to_py(NA_integer_)
+reticulate::r_to_py(NA)
+```
+
+That last one is especially concerning, since defaulting missing Boolean values to true could cause silent errors. Reticulate isn't doing anything wrong here, since that behaviour is expected in Python. In R, `NA` is of logical type (hence why there's no `NA_logical_`). And in Python, missing values become `True` when converted to Booleans:
+
+```{python missing-value-in-python, eval = TRUE}
+import numpy as np
+bool(np.NaN)
+```
+
+For the most part, converting R objects to Python work pretty well, but there are certainly some concerning edge cases. And since Metaflow is fundamentally a Python module, these conversion mishaps are important.
+
+## Metaflow's serialisation
+
+When defining a step in a Metaflow _flow_, if I want to store a value `x` as `3` I might do something like this:
+
+```{r example-metaflow-step}
+step(step = "start",
+     r_function = function(self) {
+       self$x <- 3
+     },
+     next_step = "end")
+```
+
+Metaflow does something clever under the hood. In R, that act of assigning a value with a combination of `$` and `<-` is a _generic function_. I can take a look at all of the available _methods_ associated with that function:
+
+```{r assignment-generic, eval = TRUE}
+methods(`$<-`)
+```
+
+Sure enough, `$<-.metaflow.flowspec.FlowSpec` is one such method. There's a similar method for `[[<-`, which would be used if I had instead written `self[["x"]] <- 3`. And for retrieving those values, there are methods for `$` and `[[`.
+
+Metaflow uses these methods to _serialize_ the data before it's assigned to the value, and _deserialize_ the data before it's retrieved. It uses two functions --- `mf_serialize` and `mf_deserialize` --- to do this.
+
+Metaflow's serialization function uses base R's `serialize` function for turning objects into their raw bytes. But some objects, which it calls "simple objects", go through without interference. 
+
+```{r simple_type, eval = TRUE}
+simple_type <- function(obj) {
+  if (is.atomic(obj)) {
+    return(TRUE)
+  } else if (is.list(obj)) {
+    if ("data.table" %in% class(obj)) {
+      return(FALSE)
+    }
+
+    for (item in obj) {
+      if (!simple_type(item)) {
+        return(FALSE)
+      }
+    }
+    return(TRUE)
+  } else {
+    return(FALSE)
+  }
+}
+```
+
+A value like `3` or a data frame like `mtcars` would be considered a simple type and would be left unchanged by `mf_serialize`. A function is not a simple type and so it would get be serialized. The second argument in base R's `serialize` function would usually be a connection to which the raw bytes would be sent, but the `NULL` value makes the function return those bytes instead:
+
+```{r mf_serialize, eval = TRUE}
+mf_serialize <- function(object) {
+  if (simple_type(object)) {
+    return(object)
+  } else {
+    return(serialize(object, NULL))
+  }
+}
+```
+
+The `mf_deserialize` function acts in reverse, attempting to convert raw bytes if possible, and letting other objects pass through unaffected:
+
+```{r mf_deserialize, eval = TRUE}
+mf_deserialize <- function(object) {
+  r_obj <- object
+
+  if (is.raw(object)) {
+    # for bytearray try to unserialize
+    tryCatch(
+      {
+        r_obj <- object %>% unserialize()
+      },
+      error = function(e) {
+        r_obj <- object
+      }
+    )
+  }
+  
+  return(r_obj)
+}
+```
+
+The pattern for Metaflow is that an R object is serialized with `mf_serialize` and then converted to Python with `reticulate`, although for objects of "simple type" this "serialization" does nothing. When the value is retrieved it is converted back to R and then passed through `mf_deserialize`.
+
+This behaviour was strange to me at first. Why not convert everything to raw bytes? Or nothing? It would later make sense, but I needed to run into some errors before I could understand. For now I wanted to understand what would happen if I changed the `mf_serialize` function.
+
+## Invertible R objects
+
+What I would hope is that the following holds true for all `x`:
+
+```{r invertible_concept, eval = FALSE}
+x %>% mf_serialize() %>% r_to_py %>% py_to_r %>% mf_deserialize %>% identical(x)
+```
+
+That is, an object should not be changed when it is serialized, converted to Python, converted back to R, and deserialized.
+
+That impact of this is that if I save some data to the `self` object and then later retrieve it, perhaps in a different step, then the data will be unchanged. This is important: if my data changes in subtle ways without my knowledge, then I could run into all sorts of problems, and those problems could be very quiet.
+
+To investigate this, I use the below function. For given `serialize` and `deserialize` functions, this checks if `x` comes through the above pipe unscathed. That is, it checks if `x` is _invertible_ under `serialize` and `deserialize`. Values that can't be converted to Python after serialization become `NA`:
+
+```{r is_invertible, eval = TRUE}
+is_invertible <- function(x, serialize, deserialize) {
+  as_python = tryCatch(
+    x %>% serialize() %>% reticulate::r_to_py(),
+    error = function(e) NA
+  )
+  if (identical(as_python, NA)) {
+    return(NA)
+  }
+  identical(x, as_python %>% reticulate::py_to_r() %>% deserialize())
+}
+```
+
+To test invertibility of candidate serialization functions, I put down examples for as many different types of R objects as I can think of in a named list I call `candidates`:
+
+```{r candidates, eval = TRUE}
+candidates <- list(
+  `5` = 5, `5.5` = 5.5, `5L` = 5L, `letter` = "a", `many letters` = "character",
+  `TRUE` = TRUE, `FALSE` = FALSE, `NULL` = NULL, `NaN` = NaN,
+  `Inf` = Inf, `-Inf` = -Inf, `NA_character_` = NA_character_, `NA` = NA,
+  `NA_integer_` = NA_integer_, `NA_complex_` = NA_complex_,
+  `NA_real_` = NA_real_, `date` = Sys.Date(), `time` = Sys.time(),
+  `data.frame` = mtcars, `tibble` = tibble::as_tibble(mtcars),
+  `data.table` = data.table::as.data.table(mtcars),
+  `integer vector` = c(1L, 2L, 3L), `double vector` = c(1.5, 2.5, 3.5),
+  `character vector` = c("a", "b", "c"),
+  `logical vector` = c(TRUE, FALSE, TRUE),
+  `empty integer vector` = integer(), `empty numeric vector` = numeric(),
+  `empty character vector` = character(), `empty logical vector` = logical(),
+  `empty list` = list(), `unnamed singleton list` = list("red panda"),
+  `unnamed list` = list("red panda", 5),
+  `named singleton list` = list(animal = "red panda"),
+  `named list` =list(animal = "red panda", number = 5),
+  `raw vector` = as.raw(c(1:10)),
+  `function` = function(x) x + 1,
+  `matrix` = matrix(c(1,2,3,4), nrow = 2, ncol = 2),
+  `formula` = as.formula(y ~ x),
+  `factor` = factor(c("a", "b", "c")),
+  `global environment` = globalenv(),
+  `empty environment` = emptyenv(),
+  `custom class` = structure(list(1, 2, 3), class = "custom")
+)
+```
+
+```{r failed-kable-styling, eval=FALSE, include=FALSE}
+
+# My failed attempt to make all TRUE values in the table green.
+# Works in RStudio, falls over in knitr.
+# Code included here but disabled and made invisible in the final product.
+
+tibble_of_invertibility %>% 
+  dplyr::mutate_if(
+    is.logical,
+    function(x) {
+      kableExtra::cell_spec(
+        x,
+        color = ifelse(!is.na(x) & x, "white", "black"),
+        background = ifelse(!is.na(x) & x, "green", "white")
+      )
+    }
+  ) %>% 
+  knitr::kable(escape = FALSE)
+```
+
+As an aside, these candidates make for great test cases.
+
+Now I can test three different pairs of serialisation functions:
+
+* `serialize nothing`, in which `serialize = deserialize = identity`. This tests how invertible objects are as is under Python.
+* `metaflow serialization` using `mf_serialize` and `mf_deserialize`, in which objects of "simple type" go through as is but the rest are serialized to bytes.
+* `serialize everything`, which is like `metaflow serialization` except without the exception for objects of "simple type".
+
+```{r invertibility_tibble, message = FALSE, eval = TRUE}
+tibble_of_invertibility <- tibble::tibble(
+  candidate = names(candidates),
+  `serialize nothing` = purrr::map_lgl(
+    candidates, is_invertible,
+    serialize = identity, deserialize = identity
+  ),
+  `metaflow serialization` = purrr::map_lgl(
+    candidates, is_invertible,
+    serialize = mf_serialize, deserialize = mf_deserialize
+  ),
+  `serialize everything` = purrr::map_lgl(
+    candidates, is_invertible,
+    serialize = \(x) base::serialize(x, NULL), deserialize = base::unserialize
+  )
+)
+
+tibble_of_invertibility %>% 
+  mutate_if(is.logical, ~ifelse(.x, "\U00002705", "\U0000274C")) %>% 
+  knitr::kable(align = c("l", "c", "c", "c")) 
+```
+
+It's no surprise that the more aggressive the serialization, the less that Python interferes. Raw vectors in R are translated to byte arrays in Python, so there's not much chance for interference.
+
+A few notes here. Data tables are not technically invertible under the "serialize everything" approach because the pointer changes when translating back into R from Python. However, the value of the table is the same, so it's unlikely to be an issue.
+
+Likewise, data frames and tibbles can come back from Python land with `pandas` indices, but their values are otherwise the same. So these could be argued as invertible under all of the options.
+
+## 1st attempt: Redefine `mf_serialize`
+
+It seems like, in order to minimise the interference that Python has with R data, I should redefine `mf_serialize` to be take the "serialize everything" approach:
+
+```{r mf-serialize-attempt-1}
+mf_serialize <- function(object) {
+  serialize(object, NULL)
+}
+```
+
+I don't have to touch `mf_deserialize` here; that function already attempts to `unserialize` raw vectors, and it will also preserve backwards compatibility with artifacts generated under the current version of Metaflow.
+
+But then the integration tests throw the following error at me:
+
+```text
+Metaflow 2.3.1 executing BasicForeachTestFlow for user:runner
+Validating your flow...
+    The graph looks good!
+2021-07-26 07:08:17.181 Workflow starting (run-id 1627283297164120):
+2021-07-26 07:08:17.189 [1627283297164120/start/1 (pid 14590)] Task is starting.
+2021-07-26 07:08:20.701 [1627283297164120/start/1 (pid 14590)] Task finished successfully.
+2021-07-26 07:08:20.709 [1627283297164120/foreach_split/2 (pid 14704)] Task is starting.
+2021-07-26 07:08:24.223 [1627283297164120/foreach_split/2 (pid 14704)] Foreach yields 133 child steps.
+2021-07-26 07:08:24.223 [1627283297164120/foreach_split/2 (pid 14704)] Task finished successfully.
+2021-07-26 07:08:24.225 Workflow failed.
+2021-07-26 07:08:24.225 Terminating 0 active tasks...
+2021-07-26 07:08:24.225 Flushing logs...
+    Step failure:
+    Step foreach_split (task-id 2) failed: Foreach in step foreach_split yielded 133 child steps which is more than the current maximum of 100 children. You can raise the maximum with the --max-num-splits option. 
+```
+
+Metaflow steps allow for a `foreach` argument, in which a subsequent step can be split up to be performed once for each value of a given variable. So for example, I could provide the value of `c("a", "b", "c")` to `foreach`, and the next step will be split into three, with each taking on one of the three values.
+
+Under the old `mf_serialize`, `c("a", "b", "c")` is an object of "simple type" and so is directly converted by reticulate into a numpy array in Python, `["a", "b", "c"]`. Under my new `mf_serialize`, `c("a", "b", "c")` is serialized to this:
+
+```{r simple_vector_as_bytes, eval = TRUE}
+serialize(c("a", "b", "c"), NULL)
+```
+
+This is a raw vector of `r n_bytes <- length(serialize(c("a", "b", "c"), NULL)); n_bytes` bytes, which is converted by reticulate into a byte array of `r n_bytes` bytes. When Metaflow attempts to split on this value, it generates `r n_bytes` new steps. And instead of splitting on values like "a" or "b" or "c", the generated steps will split on individual, meaningless bytes.
+
+The error above doesn't quite show this, but it does give a hint as to what's going on --- tests that previously passed are now generated so many splits that Metaflow is exceeding its configured limits.
+
+Whoever coded up `mf_serialize` was obviously aware of this, and this is why they didn't go with the far-too-simple approach of serializing everything. Python needs to be able to understand at least some of the structure of the R objects so that it can appropriately split on values in `foreach` steps.
+
+## 2nd attempt: Python classes
+
+Python needs to understand _some_ of the structure of R objects, but it doesn't need to understand everything. For example, Python needs to know that the serialized form of `c("a", "b", "c")` is actually of length 3, but it doesn't need to know the contents of the vector (I hope!). Is it possible to trick Python into thinking that those `r n_bytes` bytes are actually an object of length 3?
+
+Python classes have _dunder_ methods, so-called because they're surrounded by double underscores. These can be used to override the default behaviour of Python objects. So with a custom Python class I can define a `__getitem__` method which overrides the usual indexing behaviour with Python, like how Metaflow provides `[[` and `$` methods in R. I can also define a `__len__` method for overriding how length is calculated.
+
+The idea is to create a wrapper around R objects to stop Python from trying to apply its own logic. I'll specify the length of the R object at initialisation, and define a custom `__getitem__` method that delays indexing the object until we're back in R-land. It's like I'm giving Python exactly as much information about R objects as it needs, and not a bit more.
+
+I can define a Python class in R using reticulate. This Python class will store the serialized data representation of an R object and its pre-calculated length, and these will be left untouched in Python land.
+
+It's important that the raw R data and length are calculated before being provided to the Python class. This is because if I were to perform that calculation within the Python class constructor then the R object would be converted to Python _before_ serialization, defeating the purpose of the class. 
+
+```{r MetaflowRObject-in-r, eval = FALSE}
+MetaflowRObject <- reticulate::PyClass(
+  "MetaflowRObject",
+  list(
+    `__init__` = function(self, data, length) {
+      self$data <- data
+      self$length <- length
+      NULL
+    },
+    `__len__` = function(self) {
+      self$length
+    },
+    `__eq__` = function(self, other) {
+      self$data == other$data
+    },
+    `__getitem__` = function(self, x) {
+      mf_serialize(mf_deserialize(self$data)[[x+1]])
+    }
+  )
+)
+```
+
+Note also the `__eq__` method, which lets Python determine if two R objects are the same by comparing their representative byte arrays.
+
+The new `mf_serialize` function will look take any R object and return a Python object of class "MetaflowRObject":
+
+```{r mfserialize-attempt-2}
+mf_serialize <- function(object) {
+  MetaflowRObject(
+    data = serialize(object, NULL),
+    length = length(object)
+  )
+}
+```
+
+There's a similar `mf_deserialize` function here for converting back from these classes, but I'll skip it for now because this won't work anyway:
+
+```text
+══ Failed tests ════════════════════════════════════════════════════════════════
+── Error (test-serialization.R:3:3): serialize functions work properly ───────────────────────────
+Error: Unable to access object (object is from previous session and is now invalid)
+Backtrace:
+    █
+ 1. └─metaflow:::mf_serialize(mtcars) test-serialization.R:3:2
+ 2.   └─reticulate:::MetaflowRObject(...) /Users/mdneuzerling/Dropbox/git/metaflow/R/R/serialization.R:41:2
+ 3.     └─reticulate:::py_call_impl(callable, dots$args, dots$keywords)
+```
+
+The `MetaflowRObject` class is defined during package build, and the corresponding Python class defined at the same time. When the packages is loaded that Python class no longer exists, and so I get the above error.
+  
+## 3rd attempt: recreate the Python class every time
+
+If that's the case, I'll redefine the `MetaflowRObject` class each time an object is serialized. That is, I'll move the class definition into the body of the `mf_serialize` function. It's a little janky, but if it solves the problem I can look into cleaning it up afterwards. Unfortunately:
+
+```text
+Metaflow 2.3.1 executing BasicArtifactsTestFlow for user:mdneuzerling
+Validating your flow...
+    The graph looks good!
+2021-08-10 16:21:45.244 Workflow starting (run-id 1628576503868435):
+2021-08-10 16:21:45.333 [1628576503868435/start/1 (pid 38284)] Task is starting.
+2021-08-10 16:21:48.391 [1628576503868435/start/1 (pid 38284)] Can't pickle <class 'rpytools.call.MetaflowRObject'>: attribute lookup MetaflowRObject on rpytools.call failed
+2021-08-10 16:21:48.486 [1628576503868435/start/1 (pid 38284)] Task failed.
+2021-08-10 16:21:48.859 Workflow failed.
+2021-08-10 16:21:48.859 Terminating 0 active tasks...
+2021-08-10 16:21:48.859 Flushing logs...
+    Step failure:
+    Step start (task-id 1) failed.
+```
+
+The reticulate package provides a special `rpytools` module to Python. But when `pickle` goes looking for this it can't find it. Essentially, Pickle needs to be able to recreate objects of the class `rpytools.call.MetaflowRObject` but this class doesn't exist in any permanent sense outside of reticulate.
+
+Supposedly this wouldn't be an issue if we were serialising with `dill`, but I didn't want to propose to the Metaflow developers that we completely overhaul the serialisation system. And if my solution was janky to begin with, then I should be happy to abandon it.
+    
+## 4th attempt: define the Python class without reticulate
+
+I've done everything so far in R, but the Python parts of Metaflow aren't off-limits. The most sensible thing to do here is to define my `MetaflowRObject` class in Python, without reticulate. I put this in the `R.py` module in Metaflow Python:
+
+```python
+class MetaflowRObject:
+    def __init__(self, data, length):
+        self.data = data
+        self.length = length
+    
+    def __len__(self):
+        return self.length
+    
+    def __eq__(self, other):
+        return self.data == other.data
+    
+    def __getitem__(self, x):
+        return MetaflowRObjectIndex(self, x)
+```
+
+When Python indexes a `MetaflowRObject` it needs to return another Python object, so I need to be careful about what happens when Python attempts to extract each value of a `foreach` argument. I define `MetaflowRObject.__getitem__` to return an object of class `MetaflowRObjectIndex`, which contains the full object as well as the index. This delays the actual indexing and deserialising until it can be done in R.
+
+Note also the `r_index` property, which handles the difference between Python's 0-indexing and R's 1-indexing:
+
+```python
+class MetaflowRObjectIndex:
+    def __init__(self, full_object, index):
+        self.full_object = full_object
+        self.index = index
+        
+        if index < 0 or index >= len(full_object):
+            raise IndexError("index of MetaflowRObject out of range")
+        
+    def __eq__(self, other):
+        return (self.full_object == other.full_object and self.index == other.index)
+        
+    @property
+    def r_index(self):
+        return self.index + 1
+```
+
+Along with invertibility, my unit tests for serialization check for proper behaviour in Python land:
+
+```{r serialization-tests, eval = FALSE}
+test_that("indexing is handled in R with special Python classes", {
+  
+  a_list <- list("red panda", 5, FALSE)
+  serialised_list <- mf_serialize(a_list)
+
+  expect_s3_class(serialised_list, "metaflow.R.MetaflowRObject")
+  expect_s3_class(serialised_list[0L], "metaflow.R.MetaflowRObjectIndex")
+
+  expect_equal(mf_deserialize(serialised_list[0L]), "red panda")
+  expect_equal(mf_deserialize(serialised_list[1L]), 5)
+  expect_equal(mf_deserialize(serialised_list[2L]), FALSE)
+
+  expect_error(
+    serialised_list[-1L],
+    "IndexError: index of MetaflowRObject out of range"
+  )
+  expect_error(
+    serialised_list[3L],
+    "IndexError: index of MetaflowRObject out of range"
+  )
+})
+```
+
+I really thought I had it here. And to be fair, this attempt made it further through the integration tests than any other. But eventually there was an error:
+
+```text
+Metaflow 2.3.1 executing MergeArtifactsTestFlow for user:runner
+Validating your flow...
+    The graph looks good!
+2021-08-14 11:03:42.638 Workflow starting (run-id 1628939022630948):
+2021-08-14 11:03:42.645 [1628939022630948/start/1 (pid 12533)] Task is starting.
+2021-08-14 11:03:45.725 [1628939022630948/start/1 (pid 12533)] Task finished successfully.
+2021-08-14 11:03:45.732 [1628939022630948/foreach_split_x/2 (pid 12563)] Task is starting.
+2021-08-14 11:03:48.776 [1628939022630948/foreach_split_x/2 (pid 12563)] Foreach yields 1 child steps.
+2021-08-14 11:03:48.776 [1628939022630948/foreach_split_x/2 (pid 12563)] Task finished successfully.
+2021-08-14 11:03:48.783 [1628939022630948/foreach_split_y/3 (pid 12593)] Task is starting.
+2021-08-14 11:03:51.775 [1628939022630948/foreach_split_y/3 (pid 12593)] Foreach yields 1 child steps.
+2021-08-14 11:03:51.775 [1628939022630948/foreach_split_y/3 (pid 12593)] Task finished successfully.
+2021-08-14 11:03:51.782 [1628939022630948/foreach_split_z/4 (pid 12623)] Task is starting.
+2021-08-14 11:03:54.709 [1628939022630948/foreach_split_z/4 (pid 12623)] Foreach yields 1 child steps.
+2021-08-14 11:03:54.709 [1628939022630948/foreach_split_z/4 (pid 12623)] Task finished successfully.
+2021-08-14 11:03:54.717 [1628939022630948/foreach_inner/5 (pid 12654)] Task is starting.
+2021-08-14 11:03:57.692 [1628939022630948/foreach_inner/5 (pid 12654)] Task finished successfully.
+2021-08-14 11:03:57.700 [1628939022630948/foreach_join_z/6 (pid 12708)] Task is starting.
+2021-08-14 11:04:00.630 [1628939022630948/foreach_join_z/6 (pid 12708)] <flow MergeArtifactsTestFlow step foreach_join_z[0,0]> failed:
+2021-08-14 11:04:00.643 [1628939022630948/foreach_join_z/6 (pid 12708)] Evaluation error: has_correct_error_message is not TRUE.
+2021-08-14 11:04:00.658 [1628939022630948/foreach_join_z/6 (pid 12708)] Task failed.
+2021-08-14 11:04:00.659 Workflow failed.
+2021-08-14 11:04:00.659 Terminating 0 active tasks...
+2021-08-14 11:04:00.659 Flushing logs...
+    Step failure:
+    Step foreach_join_z (task-id 6) failed.
+```
+
+There's some sort of mishap with how these various artefacts are merged after being split.
+
+## Where to from here
+
+This is a tough thing to debug. I'm running code across two different languages and multiple processes.
+
+I can think of one way forward. I should try to create a simpler reproducible example. The `MetaflowRObject` class doesn't _need_ to come from R, so I could potentially create a reproducible example in Python only. I might not be able to immediately solve the problem, but I can try to simplify it.
+
+I also need to closely study the way that Metaflow splits steps and merges artifacts. There could be something here that I'm missing. Maybe if I re-read the source code something will jump out at me!
+
+But if nothing else, this has been a fun exploration of the way that R and Python interact. I've learnt a lot about reticulate, data types, and pickles.
+
+## Bonus: simplifying `mf_deserialize` with S3 classes
+
+I've focussed on `mf_serialize` here but every implementation of `mf_serialize` has a corresponding `mf_deserialize`. There's also a need for backwards compatibility, to be able to deserialize objects from older Metaflow runs.
+
+Under the definition of `mf_serialize` in my 4th attempt, I have different deserialisation approaches for `MetaflowRObject`, `MetaflowRObjectIndex`, `raw`, and default method which leaves all other types untouched. Rather than polluting the `mf_deserialize` function with a convoluted chain of `if-else` branches, I can keep things tidy by leaning once again on S3.
+
+Python classes can be given the S3 treatment in R. Their classes are already available to dispatch on. So I can define a method for an object of class `metaflow.R.MetaflowRObject`.
+
+```{r mf-deserialize, eval = FALSE}
+mf_deserialize <- function(object) {
+  UseMethod("mf_deserialize", object)
+}
+
+mf_deserialize.metaflow.R.MetaflowRObject <- function(object) {
+  unserialize(object$data)
+}
+
+mf_deserialize.metaflow.R.MetaflowRObjectIndex <- function(object) {
+  mf_deserialize.metaflow.R.MetaflowRObject(object$full_object)[[object$r_index]]
+}
+
+mf_deserialize.raw <- function(object) {
+  tryCatch(unserialize(object), error = function(e) {object})
+}
+
+mf_deserialize.default <- function(object) {
+  object
+}
+```
+
+The downside is that I need to export the `mf_deserialize` function (and, to be consistent, `mf_serialize`). It makes the namespace a little dirtier; users shouldn't need to use these functions directly, so I'd prefer it if they were hidden.
+
+***
+
+[The image at the top of this page is by Johannes Plenio from Pexels](https://www.pexels.com/photo/brown-and-black-brick-wall-2259233/)
+
+```{r sessioninfo, eval=TRUE}
+devtools::session_info()
+```
