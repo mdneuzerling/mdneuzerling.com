@@ -21,6 +21,6 @@ excerpt_length = 300
 
 # Footer
 footer_lines = [
-    "The content of this blog is licensed under a <a href=\"http://creativecommons.org/licenses/by-nc-nd/4.0/\" rel=\"license\">Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License</a> except where stated otherwise. The build script and CSS of this website were generated with the assistance of a large language model. LLMs have not been used to generate any content."
+    "The content of this blog is licensed under a <a href='http://creativecommons.org/licenses/by-nc-nd/4.0/' rel='license'>Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License</a> except where stated otherwise. The build script and CSS of this website were generated with the assistance of a large language model. LLMs have not been used to generate any content."
 ]
 
