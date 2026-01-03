@@ -277,9 +277,10 @@ EOF
 }
 
 generate_footer() {
+    local current_year=$(date +%Y)
     cat <<EOF
     <footer class="site-footer">
-        <p>Copyright © <span id="current-year"></span> $(html_escape "$AUTHOR_NAME")</p>
+        <p>Copyright © ${current_year} $(html_escape "$AUTHOR_NAME")</p>
 EOF
     while IFS= read -r line; do
         if [[ -n "$line" ]]; then
@@ -287,7 +288,6 @@ EOF
         fi
     done <<< "$FOOTER_LINES"
     cat <<EOF
-        <script>document.getElementById('current-year').textContent = new Date().getFullYear();</script>
     </footer>
 EOF
 }
