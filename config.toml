@@ -1,6 +1,6 @@
 # Site Configuration
 site_title = "David Neuzerling"
-site_description = "Data specialist and former mathematician, with a background in modelling, forecasting and visualisation."
+site_description = "Personal blog of David Neuzerling. Data scientist, R engineer, also Python and Julia. Former mathematician, now accidental econometrician."
 base_url = "https://mdneuzerling.com"
 
 # Author Information
