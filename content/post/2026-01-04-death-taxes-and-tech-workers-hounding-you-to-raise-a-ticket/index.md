@@ -13,7 +13,7 @@ Everyone hates ticketing systems. Everyone needs ticketing systems. Ticketing sy
 
 I rolled out a small-scale ticketing system recently for my team. Here are some thoughts.
 
-# Tickets make work scalable
+# Tickets exist to make work scalable
 
 There is always a default workflow system: you tap someone on the shoulder, or message them through Slack/Teams/Skype/IRC, and say "Hey, you got a second?". In the absence of any ticketing system --- and often in spite of any ticketing system --- people will revert to this approach. It's quick and easy.
 
